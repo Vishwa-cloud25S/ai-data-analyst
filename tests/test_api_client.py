@@ -110,3 +110,19 @@ def test_ask_against_live_api(live_api_url):
     )
     assert res["status"] == "answered"
     assert res["row_count"] > 0
+
+
+def test_bare_host_port_gets_a_scheme():
+    """Render injects 'host:port' with no scheme; requests rejects that outright."""
+    from ui.api_client import normalise_base_url
+
+    assert normalise_base_url("ai-data-analyst-api:10000") == "http://ai-data-analyst-api:10000"
+    assert normalise_base_url("http://x:1") == "http://x:1"
+    assert normalise_base_url("https://x.onrender.com/") == "https://x.onrender.com"
+    assert normalise_base_url("") == ""
+
+
+def test_schemeless_url_raises_apierror_not_a_traceback():
+    client = ApiClient("does-not-resolve-xyz:10000", timeout=5)
+    with pytest.raises(ApiError):
+        client.health()

@@ -4,6 +4,10 @@
 #   1. Push this repo to GitHub
 #   2. Render dashboard -> New -> Blueprint -> pick the repo
 #   3. Optionally set OPENAI_API_KEY on the api service (it runs fine without)
+#
+# Note: if a service name is already taken globally, Render appends a suffix
+# (ai-data-analyst-api -> ai-data-analyst-api-krvg.onrender.com). The public URL
+# changes, but the blueprint's internal fromService wiring is unaffected.
 services:
   - type: web
     name: ai-data-analyst-api
@@ -31,6 +35,8 @@ services:
     plan: free
     autoDeploy: true
     envVars:
+      # hostport resolves to "host:port" with no scheme on Render's private
+      # network; the UI client prepends http:// when a scheme is absent.
       - key: API_URL
         fromService:
           type: web

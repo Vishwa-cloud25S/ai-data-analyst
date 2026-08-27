@@ -18,10 +18,28 @@ class ApiError(Exception):
     """Raised when the API is unreachable, errors, or is not our API."""
 
 
+def normalise_base_url(url: str) -> str:
+    """Accept 'host:port' as well as full URLs.
+
+    Render's `fromService: property: hostport` injects a bare host:port with no
+    scheme, and requests refuses such URLs outright. Defaulting to http:// keeps
+    private-network service discovery working.
+    """
+    url = (url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if "://" not in url:
+        url = f"http://{url}"
+    return url
+
+
 @dataclass
 class ApiClient:
     base_url: str
     timeout: int = 120
+
+    def __post_init__(self) -> None:
+        self.base_url = normalise_base_url(self.base_url)
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url.rstrip('/')}{path}"
@@ -34,6 +52,9 @@ class ApiClient:
             ) from exc
         except requests.exceptions.Timeout as exc:
             raise ApiError(f"The API at {url} timed out after {self.timeout}s.") from exc
+        except requests.exceptions.RequestException as exc:
+            # Malformed URL, bad redirect, TLS failure - never surface a raw traceback.
+            raise ApiError(f"Request to {url} failed: {type(exc).__name__}: {exc}") from exc
 
         if resp.status_code >= 400:
             detail = ""
