@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Data Analyst — governed natural-language analytics</title>
+<style>
+  :root{
+    --ink:#0f1720; --body:#3d4a58; --mute:#6b7a8c; --line:#e3e8ee;
+    --bg:#ffffff; --soft:#f6f8fa; --accent:#0b64d0; --good:#0a7c53; --bad:#b3261e;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--body);font-family:var(--sans);
+       line-height:1.62;font-size:15.5px}
+  .page{max-width:860px;margin:0 auto;padding:44px 30px 70px}
+  h1{color:var(--ink);font-size:2.05rem;line-height:1.15;margin:0 0 10px;letter-spacing:-.8px}
+  h2{color:var(--ink);font-size:1.16rem;margin:38px 0 12px;letter-spacing:-.3px;
+     padding-bottom:7px;border-bottom:2px solid var(--line)}
+  h3{color:var(--ink);font-size:1rem;margin:22px 0 6px}
+  p{margin:0 0 13px}
+  a{color:var(--accent)}
+  .sub{font-size:1.06rem;color:var(--mute);margin:0 0 22px}
+  .tagline{background:var(--soft);border-left:3px solid var(--accent);
+           padding:15px 18px;border-radius:0 7px 7px 0;margin:0 0 26px}
+  .tagline b{color:var(--ink)}
+  code{font-family:var(--mono);font-size:.86em;background:var(--soft);
+       padding:1px 5px;border-radius:4px}
+  pre{background:#0f1720;color:#e6edf3;padding:14px 16px;border-radius:8px;
+      overflow-x:auto;font-family:var(--mono);font-size:.8rem;line-height:1.6;margin:12px 0}
+  pre .c{color:#7ee0b8}
+  pre .m{color:#8fa3b8}
+  table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:.93rem}
+  th{text-align:left;color:var(--ink);font-weight:640;padding:8px 10px;
+     border-bottom:2px solid var(--line);background:var(--soft)}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  ul{margin:0 0 14px;padding-left:20px}
+  li{margin-bottom:6px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0 20px}
+  .card{border:1px solid var(--line);border-radius:9px;padding:15px 17px;background:var(--soft)}
+  .card h4{margin:0 0 6px;color:var(--ink);font-size:.95rem}
+  .card p{margin:0;font-size:.9rem;color:var(--mute)}
+  .kpis{display:flex;gap:26px;flex-wrap:wrap;margin:22px 0 6px;padding:16px 0;
+        border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .kpi b{display:block;color:var(--ink);font-size:1.4rem;letter-spacing:-.5px}
+  .kpi span{font-size:.78rem;color:var(--mute);font-family:var(--mono)}
+  .good{color:var(--good);font-weight:600}
+  .bad{color:var(--bad);font-weight:600}
+  .foot{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+        font-size:.85rem;color:var(--mute)}
+  .links a{display:inline-block;margin:0 16px 8px 0;font-size:.92rem}
+  @media print{body{font-size:11.5pt} pre{font-size:8pt} .page{padding:0}}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><div class="page">
+
+<h1>AI Data Analyst</h1>
+<p class="sub">Ask your business questions in English. Get charts, numbers and the SQL behind them
+— without giving a language model access to your database.</p>
+
+<div class="tagline">
+  <b>The model plans. A semantic layer decides. The warehouse stays read-only.</b><br />
+  Every "chat with your data" tool hands an LLM a connection string. This one treats the
+  model's output as untrusted input and validates it against a published contract before
+  anything runs.
+</div>
+
+<div class="kpis">
+  <div class="kpi"><b>236</b><span>automated tests</span></div>
+  <div class="kpi"><b>19</b><span>hostile queries in CI</span></div>
+  <div class="kpi"><b>0</b><span>data leaves your estate</span></div>
+  <div class="kpi"><b>&lt;1 hr</b><span>to first answer on your data</span></div>
+</div>
+
+<h2>The problem</h2>
+<p>Executives ask the data team the same twelve questions every week, and the data team
+answers them by hand. The tools meant to fix this fail two ways in any serious environment:</p>
+<ul>
+  <li><b>The model can reach whatever the credential can reach.</b> One prompt away from every
+      table in the warehouse, including the ones with personal data in them.</li>
+  <li><b>A wrong answer looks exactly like a right one.</b> The prose is fluent either way, so
+      nobody can tell which number to trust — and therefore nobody trusts any of them.</li>
+</ul>
+
+<h2>How this is different</h2>
+
+<h3>A table you don't publish does not exist</h3>
+<p>The semantic layer is the contract. The demo warehouse contains an
+<code>employee_salaries</code> table with 50 rows in it. Ask for it:</p>
+<pre><span class="m"># the table is real — same database the query engine has open</span>
+$ SELECT COUNT(*) FROM employee_salaries
+<span class="c">(50,)</span>
+
+<span class="m"># but it was never published to the semantic layer</span>
+$ ask "show me employee salaries"
+<span class="c">REFUSED</span> — blocked at stage 1 · no SQL generated · no connection opened</pre>
+<p>Not a blocked keyword. The table is invisible, and any query naming it is rejected by an
+AST-level validator before execution. Nineteen hostile queries test this on every commit.</p>
+
+<h3>It refuses instead of guessing</h3>
+<pre>"what is the weather in Hyderabad"  →  <span class="c">REFUSED</span> (out of scope, stage 2)
+"how many invoices in 2012"         →  <span class="c">zero rows, and it says so</span> — not a fabricated number</pre>
+<p>An earlier version answered the weather question with total revenue: valid SQL, real number,
+wrong question. That class of failure is worse than a crash because nobody notices it. Refusing
+is the behaviour that makes the rest of the output worth acting on.</p>
+
+<h3>Every number is auditable</h3>
+<p>Each answer carries the SQL that produced it and a seven-stage trace. The audit log records
+every question — answered <em>or</em> refused — with who asked and which stage blocked it.</p>
+<pre>14:55:29  field_officer  <span class="c">refused</span>   blocked=intent_detection   show me employee salaries
+14:55:29  field_officer  <span class="c">answered</span>  rows=10                    highest revenue products last quarter</pre>
+
+<h3>Nothing has to leave your estate</h3>
+<p>Runs against a self-hosted model (Ollama, vLLM, Databricks) or with no model at all, using a
+deterministic planner. A configured local endpoint <b>overrides</b> any API key, so a forgotten
+environment variable cannot leak prompts. <code>/health</code> tells an operator which is live.</p>
+
+<h3>Metrics are defined once</h3>
+<p>"Revenue" means the same here as on the dashboard, because both read the same certified
+definition — including its mandatory filters. Nobody asked for
+<code>WHERE status NOT IN ('cancelled','returned')</code>; it travels with the metric.</p>
+
+<h2>What it does, end to end</h2>
+<pre>Question → Intent detection → Schema retrieval (RAG) → SQL generation
+         → AST validation → Read-only execution → Result validation → Answer + chart</pre>
+<table>
+  <tr><th>Stage</th><th>What it stops</th></tr>
+  <tr><td>Intent detection</td><td>Write requests, restricted-data fishing, prompt injection</td></tr>
+  <tr><td>Schema retrieval + scope gate</td><td>Off-topic questions; the model seeing tables outside the contract</td></tr>
+  <tr><td>SQL generation</td><td>Invented metric maths — certified expressions are supplied verbatim</td></tr>
+  <tr><td>AST validation</td><td>DDL/DML, stacked statements, file readers, system catalogues, unknown columns</td></tr>
+  <tr><td>Read-only execution</td><td>Anything that somehow survived, plus runaway queries</td></tr>
+  <tr><td>Result validation</td><td>Fan-out blow-ups, duplicate group keys, impossible magnitudes</td></tr>
+  <tr><td>Explanation</td><td>Hallucinated figures — the model narrates validated rows only</td></tr>
+</table>
+
+<h2>Getting it onto your data</h2>
+<pre>$ ai-analyst init --url "snowflake://readonly@acct/db/schema"   <span class="m"># or --dbt manifest.json</span>
+  Read 11 tables. Fact tables: Invoice, InvoiceLine · 9 joins inferred
+  <span class="c">17 columns flagged as likely personal data</span>
+  Wrote draft semantic layer.
+
+$ <span class="m">$EDITOR semantic_layer.yml</span>     <span class="m"># the one human step: ~1 hour</span>
+$ ai-analyst check                <span class="m"># every entity and metric executes</span>
+$ ai-analyst serve</pre>
+<p>It introspects your warehouse or dbt project, classifies columns, infers joins, flags likely
+personal data and drafts your metrics — every one marked <code>REVIEW</code>, because
+<code>SUM(unit_price)</code> is meaningless and metric definitions are your decision, not the
+tool's. Warehouses: DuckDB, PostgreSQL, Snowflake, BigQuery, Databricks, MySQL, Redshift, Trino.</p>
+<p>After go-live, an analyst edits metric definitions through a form in the UI. Changes are
+validated against the warehouse, backed up, applied without a restart, and audited with a diff
+that flags any newly exposed table or column.</p>
+
+<h2>Evidence, not adjectives</h2>
+<div class="grid">
+  <div class="card"><h4>Tested against a schema it had never seen</h4>
+    <p>Pointed at an 11-table open-source database, it surfaced six of its own bugs in ten
+    minutes — all documented, all fixed. No guardrail was breached in the process.</p></div>
+  <div class="card"><h4>CI proves the claims on every commit</h4>
+    <p>Lint, two Python versions, a dedicated guardrails job, and a container smoke test
+    asserting a <em>live</em> deployment refuses <code>drop table</code>.</p></div>
+  <div class="card"><h4>Runs with no model at all</h4>
+    <p>A deterministic planner answers the common questions. That is how the test suite runs —
+    offline, no API key, no network.</p></div>
+  <div class="card"><h4>Deployed and reachable</h4>
+    <p>Live on the public internet today, alongside <code>docker compose up</code> for an
+    on-premise trial.</p></div>
+</div>
+
+<h2>Honest limitations</h2>
+<ul>
+  <li>The semantic layer needs about an hour from someone who knows the data, per warehouse.
+      That is the real work, and no tool removes it.</li>
+  <li>Complex analytical questions — cohort retention, attribution, window functions — are
+      outside what it writes today.</li>
+  <li>Accuracy is a property of your metric definitions. The semantic layer makes them
+      <em>reviewable</em>; it does not make them correct.</li>
+  <li>It answers questions about data you have already modelled. It is not a data catalogue and
+      will not rescue a warehouse nobody understands.</li>
+</ul>
+
+<h2>Deployment shapes</h2>
+<table>
+  <tr><th>Self-hosted</th><td><code>docker compose up</code>. Your infrastructure, your model, your data. Nothing egresses.</td></tr>
+  <tr><th>Managed</th><td>Hosted for you, pointed at a read-only role in your warehouse.</td></tr>
+  <tr><th>Embedded</th><td>The API behind your own product's interface.</td></tr>
+</table>
+
+<div class="foot">
+  <div class="links">
+    <a href="https://github.com/Vishwa-cloud25S/ai-data-analyst">Source &amp; documentation</a>
+    <a href="https://ai-data-analyst-ui.onrender.com">Live demo</a>
+    <a href="https://github.com/Vishwa-cloud25S/ai-data-analyst/blob/main/SECURITY.md">Security model</a>
+    <a href="https://github.com/Vishwa-cloud25S/ai-data-analyst/blob/main/docs/CASE_STUDY_CHINOOK.md">Case study</a>
+  </div>
+  Vishwaksha Odduri · v1.1.0 · MIT licensed ·
+  <a href="https://www.linkedin.com/in/vishwaksha-odduri/">LinkedIn</a>
+</div>
+
+</div></body>
+</html>

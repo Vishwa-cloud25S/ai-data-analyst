@@ -4,6 +4,26 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is
 [semantic](https://semver.org/).
 
+## [1.1.0] — 2026-08-27
+
+### Added
+
+**Semantic-layer editor** — admin-only endpoints (`GET/PUT /semantic-layer/raw`,
+`/validate`, `/versions`, `/restore/{id}`) and a UI panel, so metric definitions
+are owned by the person who understands the business rather than the person who
+edits YAML. A candidate layer must load *and* execute every entity and metric
+against the live warehouse before it is written; saves are atomic, backed up,
+restorable, applied without a restart, and audited with a diff that flags newly
+exposed tables and columns.
+
+### Fixed
+
+**Metric selection was hardcoded.** A metric defined at runtime — or by any
+customer — was unreachable by name, and the question silently fell back to the
+default. Metric resolution now scores question tokens against the names and
+labels declared in the layer. Third occurrence of the same pattern: code paths
+that do not read from the semantic layer eventually contradict it.
+
 ## [1.0.0] — 2026-08-27
 
 First release considered deployable against a real customer warehouse.
@@ -88,4 +108,5 @@ planning:
   metric names, a hardcoded `order_date`, single-hop-only joins, and a hardcoded
   dimension vocabulary that silently dropped groupings.
 
+[1.1.0]: https://github.com/Vishwa-cloud25S/ai-data-analyst/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Vishwa-cloud25S/ai-data-analyst/releases/tag/v1.0.0

@@ -31,7 +31,7 @@ natural-language explanation.
 app = FastAPI(
     title="AI Data Analyst",
     description=DESCRIPTION,
-    version="1.0.0",
+    version="1.1.0",
 )
 
 app.add_middleware(
