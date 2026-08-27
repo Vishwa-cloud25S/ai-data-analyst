@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     postgres_dsn: str = "postgresql://analyst:analyst@localhost:5432/warehouse"
 
     # --- LLM ---
+    # provider: auto (openai if a key is set) | openai | local | none
+    llm_provider: Literal["auto", "openai", "local", "none"] = "auto"
+    # Set for any OpenAI-compatible local server and the app talks to it instead:
+    #   Ollama    http://localhost:11434/v1
+    #   vLLM      http://localhost:8000/v1
+    #   LM Studio http://localhost:1234/v1
+    llm_base_url: str = ""
+    llm_model: str = ""          # defaults to openai_model when empty
+    llm_timeout_seconds: int = 60
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     llm_temperature: float = 0.0

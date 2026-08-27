@@ -87,7 +87,10 @@ POST /ask {"question": "..."}
 
 | Condition | Behaviour |
 |---|---|
-| No `OPENAI_API_KEY` | Deterministic planner + template narrator. Full pipeline, no network. |
+| No `OPENAI_API_KEY` and no `LLM_BASE_URL` | Deterministic planner + template narrator. Full pipeline, no network. |
+| `LLM_BASE_URL` set | All prompts go to that local endpoint; OpenAI is never contacted, even if a key is present. |
+| Local server rejects `response_format` | JSON mode is disabled for the session and the call retried; the decision is cached. |
+| Local model returns prose or fenced JSON | Extracted defensively; unparseable output falls back to the planner. |
 | OpenAI call errors / times out | Same offline fallback, logged as a warning. |
 | LLM SQL fails validation | Retry with deterministic planner SQL; if that also fails → `refused`. |
 | Query returns > `MAX_ROWS` | Truncated, flagged in warnings, confidence reduced. |

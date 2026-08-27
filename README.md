@@ -149,6 +149,32 @@ docker compose up --build     # API on :8000, UI on :8501
 docker compose --profile postgres up --build   # adds a least-privilege Postgres warehouse
 ```
 
+### Three LLM modes, including fully self-hosted
+
+| Set this | What happens | Data leaves the host? |
+|---|---|---|
+| *nothing* | Deterministic planner writes the SQL | No |
+| `OPENAI_API_KEY` | Hosted OpenAI writes the SQL | Yes |
+| `LLM_BASE_URL` | Any OpenAI-compatible **local** server does | **No** |
+
+```bash
+# fully self-hosted, nothing leaves the machine
+docker compose --profile ollama up --build
+docker compose exec ollama ollama pull llama3.1:8b
+LLM_BASE_URL=http://ollama:11434/v1 LLM_MODEL=llama3.1:8b docker compose up api
+```
+
+`LLM_BASE_URL` **takes precedence over `OPENAI_API_KEY`**: once a local endpoint is
+configured, a forgotten key in the environment cannot cause prompts to be sent
+off-host. That ordering is deliberate — for buyers holding personal data, "we might
+have called an external API" is a breach, not a bug.
+
+Local models are less obedient than hosted ones, so the client negotiates JSON mode
+once, remembers if the server rejects it, and extracts JSON from markdown fences or
+surrounding prose. If a local model returns nonsense, the deterministic planner takes
+over — and its SQL faces the same validator either way. A rogue local model asking for
+`employee_salaries` is refused exactly like a rogue hosted one; there is a test for it.
+
 ### It runs with no API key
 
 If `OPENAI_API_KEY` is empty, a deterministic **planner** compiles the detected intent into
@@ -209,7 +235,7 @@ app/
   semantic/     semantic_layer.yml + loader
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          157 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          177 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -218,7 +244,7 @@ tests/          157 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 157 tests, no network required
+make test        # 177 tests, no network required
 make lint
 ```
 

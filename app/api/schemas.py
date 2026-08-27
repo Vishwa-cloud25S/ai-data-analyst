@@ -53,6 +53,7 @@ class HealthResponse(BaseModel):
     status: str
     warehouse: str
     llm: str
+    llm_provider: str = "none"
     entities: int
     metrics: int
     auth_enabled: bool = False

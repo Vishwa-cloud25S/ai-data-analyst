@@ -16,12 +16,33 @@ services:
       retries: 10
     profiles: ["postgres"]
 
+  # Fully self-hosted LLM. Nothing leaves the host.
+  #   docker compose --profile ollama up --build
+  #   docker compose exec ollama ollama pull llama3.1:8b
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    profiles: ["ollama"]
+
   api:
     build: .
     environment:
       WAREHOUSE: ${WAREHOUSE:-duckdb}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      # Set LLM_BASE_URL to route every prompt to a local server instead.
+      # With the ollama profile: http://ollama:11434/v1
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      API_KEYS: ${API_KEYS:-}
       POSTGRES_DSN: postgresql://analyst_ro:analyst_ro@postgres:5432/warehouse
       MAX_ROWS: ${MAX_ROWS:-1000}
     ports: ["8000:8000"]
@@ -40,3 +61,4 @@ services:
 volumes:
   pgdata:
   warehouse:
+  ollama:

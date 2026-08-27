@@ -40,7 +40,8 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         warehouse=settings.warehouse,
-        llm=settings.openai_model if get_llm().available else "offline-rules",
+        llm=get_llm().describe(),
+        llm_provider=get_llm().provider,
         entities=len(sl.entities),
         metrics=len(sl.metrics),
         auth_enabled=settings.auth_enabled,
