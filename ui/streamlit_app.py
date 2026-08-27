@@ -8,14 +8,15 @@ from __future__ import annotations
 import os
 
 import pandas as pd
-import requests
 import streamlit as st
 
 # streamlit run puts the script's own directory on sys.path, plain imports
 # put the project root there; support both so `make ui` and Docker agree.
 try:
+    from ui.api_client import ApiClient, ApiError
     from ui.charts import build_figure
 except ImportError:  # pragma: no cover
+    from api_client import ApiClient, ApiError
     from charts import build_figure
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -35,18 +36,16 @@ STAGE_LABELS = {
 STATUS_ICON = {"ok": "✅", "blocked": "🛑", "error": "❌", "skipped": "⏭️"}
 
 
-@st.cache_data(ttl=30)
-def get_json(path: str):
+client = ApiClient(API_URL)
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def cached_get(path: str) -> dict:
+    """Returns {"ok": bool, "data"|"error": ...} so callers must handle failure."""
     try:
-        return requests.get(f"{API_URL}{path}", timeout=10).json()
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-def ask(question: str, use_llm: bool):
-    return requests.post(f"{API_URL}/ask",
-                         json={"question": question, "use_llm": use_llm},
-                         timeout=120).json()
+        return {"ok": True, "data": ApiClient(API_URL).get(path)}
+    except ApiError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # ----------------------------------------------------------------- sidebar
@@ -54,16 +53,19 @@ with st.sidebar:
     st.title("📊 AI Data Analyst")
     st.caption("Natural language → governed SQL → chart + explanation")
 
-    health = get_json("/health")
-    if "error" in health:
-        st.error(f"API unreachable at {API_URL}\n\n{health['error']}")
-    else:
+    st.caption(f"API: `{API_URL}`")
+    api_ok = False
+    try:
+        health = client.health()
+        api_ok = True
         st.success("API healthy")
         c1, c2 = st.columns(2)
-        c1.metric("Warehouse", health.get("warehouse", "?"))
-        c2.metric("Model", health.get("llm", "?"))
-        st.caption(f"{health.get('entities', 0)} entities · "
-                   f"{health.get('metrics', 0)} certified metrics")
+        c1.metric("Warehouse", health["warehouse"])
+        c2.metric("Model", health["llm"])
+        st.caption(f"{health['entities']} entities · "
+                   f"{health['metrics']} certified metrics")
+    except ApiError as exc:
+        st.error(str(exc))
 
     use_llm = st.toggle("Use LLM", value=True,
                         help="Off = deterministic planner only (no API calls).")
@@ -77,8 +79,9 @@ with st.sidebar:
         "- Results are sanity-checked before they are narrated"
     )
 
-    sem = get_json("/semantic-layer")
-    if "metrics" in sem:
+    sem_resp = cached_get("/semantic-layer") if api_ok else {"ok": False}
+    if sem_resp.get("ok") and sem_resp["data"].get("metrics"):
+        sem = sem_resp["data"]
         with st.expander("Certified metrics"):
             for m in sem["metrics"]:
                 st.markdown(f"**{m['label']}** — {m['description']}")
@@ -87,7 +90,13 @@ with st.sidebar:
 # ----------------------------------------------------------------- main
 st.header("Ask a question about the business")
 
-examples = get_json("/examples").get("questions", [])
+if not api_ok:
+    st.error("The API is not reachable, so questions cannot be answered. "
+             "See the sidebar for details.")
+    st.stop()
+
+ex_resp = cached_get("/examples")
+examples = ex_resp["data"].get("questions", []) if ex_resp.get("ok") else []
 if "question" not in st.session_state:
     st.session_state.question = examples[0] if examples else ""
 
@@ -103,9 +112,9 @@ run = st.button("Analyse", type="primary")
 if run and question.strip():
     with st.spinner("Running the governed pipeline…"):
         try:
-            res = ask(question, use_llm)
-        except Exception as exc:
-            st.error(f"Request failed: {exc}")
+            res = client.ask(question, use_llm)
+        except ApiError as exc:
+            st.error(str(exc))
             st.stop()
 
     status = res.get("status")
@@ -116,7 +125,7 @@ if run and question.strip():
     elif status == "error":
         st.error(res.get("answer"))
     else:
-        st.success(res.get("answer"))
+        st.success(res.get("answer") or "(no answer returned)")
         conf = res.get("confidence", 0)
         st.progress(min(max(conf, 0.0), 1.0), text=f"Confidence {conf:.0%}")
 
