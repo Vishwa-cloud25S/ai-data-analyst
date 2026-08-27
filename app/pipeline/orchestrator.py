@@ -138,6 +138,15 @@ class Analyst:
                 issues=["No term in the question maps to the semantic layer."],
             )
 
+        # Dimensions come from the semantic layer, not a hardcoded word list.
+        from app.pipeline.intent import extract_dimensions, metric_vocabulary
+
+        discovered = extract_dimensions(question, sl, skip=metric_vocabulary(sl))
+        merged = [d for d in intent.dimensions if sl.resolve_grouping(d)] + [
+            d for d in discovered if d not in intent.dimensions
+        ]
+        intent.dimensions = list(dict.fromkeys(merged))
+
         if intent.intent == "metadata":
             answer = self._describe_schema(context)
             stage("metadata_answer", "ok", time.perf_counter())

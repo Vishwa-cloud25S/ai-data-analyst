@@ -135,6 +135,45 @@ def _rule_based(question: str) -> Intent:
                   f"Rule-based classification as {intent}.")
 
 
+def extract_dimensions(question: str, sl, skip: set[str] | None = None) -> list[str]:
+    """Find grouping words by asking the semantic layer what it recognises.
+
+    The previous implementation matched a hardcoded dictionary of words from
+    the demo schema, so on a real customer schema "top genres by revenue"
+    silently lost the grouping and returned a single total - a confidently
+    wrong answer. Anything schema-specific has to come from the layer.
+    """
+    from app.pipeline.retrieval import STOPWORDS
+    from app.semantic.bootstrap import _singularise
+
+    skip = skip or set()
+    skip = skip | {_singularise(w) for w in skip}
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", question.lower())
+    found: list[str] = []
+    for w in words:
+        if w in STOPWORDS or w in found:
+            continue
+        if w in skip or _singularise(w) in skip:
+            continue
+        if sl.resolve_grouping(w) is not None:
+            found.append(w)
+    return found
+
+
+def metric_vocabulary(sl) -> set[str]:
+    """Words that name metrics, so they are never treated as groupings."""
+    from app.semantic.bootstrap import snake
+
+    vocab: set[str] = set()
+    for name, metric in sl.metrics.items():
+        vocab.update(snake(name).split("_"))
+        vocab.update(re.findall(r"[a-z]+", metric.label.lower()))
+    for words in _METRIC_WORDS.values():
+        for w in words:
+            vocab.update(w.split())
+    return {w for w in vocab if len(w) > 2}
+
+
 def detect_intent(question: str, use_llm: bool = True) -> Intent:
     fallback = _rule_based(question)
     if fallback.intent == "unsupported":

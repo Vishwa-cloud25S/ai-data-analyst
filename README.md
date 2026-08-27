@@ -151,7 +151,11 @@ decisions; the generator drafts, a human signs off.
 broken definition or schema drift fails loudly instead of at demo time. Put it in CI.
 
 See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full path from a customer's
-warehouse to a served answer.
+warehouse to a served answer, and
+[docs/CASE_STUDY_CHINOOK.md](docs/CASE_STUDY_CHINOOK.md) for what happened the
+first time this was pointed at a schema it had never seen — six bugs in ten
+minutes, including a passing test that only passed because its fixtures shared
+my assumptions.
 
 ## Quick start
 
@@ -260,7 +264,7 @@ app/
   semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          194 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          198 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -269,7 +273,7 @@ tests/          194 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 194 tests, no network required
+make test        # 198 tests, no network required
 make lint
 ```
 

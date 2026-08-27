@@ -16,6 +16,32 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+_CAMEL_1 = re.compile(r"(.)([A-Z][a-z]+)")
+_CAMEL_2 = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def snake(name: str) -> str:
+    """CamelCase -> snake_case, so heuristics work on real-world schemas.
+
+    Chinook, most .NET-era schemas and plenty of enterprise warehouses use
+    InvoiceLineId, not invoice_line_id. Matching on the raw name classified
+    TrackId as a measure and proposed SUM(TrackId) - the exact disaster the
+    measure heuristics exist to prevent.
+    """
+    return _CAMEL_2.sub(r"\1_\2", _CAMEL_1.sub(r"\1_\2", name)).lower()
+
+
+def _singularise(word: str) -> str:
+    w = word.lower()
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("ses") or w.endswith("xes"):
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
 # Columns whose names suggest an additive business measure.
 MEASURE_HINTS = re.compile(
     r"(amount|amt|revenue|sales|price|cost|qty|quantity|total|value|units?|"
@@ -23,7 +49,18 @@ MEASURE_HINTS = re.compile(
     re.I,
 )
 # Numeric columns that are really identifiers or flags, not measures.
-NOT_MEASURE = re.compile(r"(_id|_key|_code|_no|_number|year|month|day|flag|is_|has_)$", re.I)
+NOT_MEASURE = re.compile(
+    r"((^|_)(id|key|code|no|number|year|month|day|flag|rank|position|zip|postal)$|"
+    r"^(is|has)_)", re.I,
+)
+
+# Columns that usually carry personal data. Flagged loudly, never auto-deleted:
+# a tool that silently decides what is sensitive will eventually miss something.
+PII_HINTS = re.compile(
+    r"(email|phone|fax|mobile|address|postcode|postal|zip|dob|birth|ssn|nino|aadhaar|"
+    r"passport|salary|pay|compensation|password|token|secret|first_name|last_name|"
+    r"full_name|surname|gender|ethnic|religion|latitude|longitude)", re.I,
+)
 
 NUMERIC_TYPES = re.compile(
     r"(int|numeric|decimal|double|float|real|money|bigint|smallint)", re.I
@@ -53,25 +90,39 @@ class TableInfo:
     def qualified(self) -> str:
         return f"{self.schema}.{self.name}" if self.schema else self.name
 
+    #: set by infer_joins/to_yaml when the surrounding schema is known
+    fk_like: int = 0
+
     @property
     def is_fact(self) -> bool:
-        if self.name.lower().startswith(FACT_PREFIXES):
+        sname = self.name.lower()
+        if sname.startswith(FACT_PREFIXES):
             return True
-        if self.name.lower().startswith(DIM_PREFIXES):
+        if sname.startswith(DIM_PREFIXES):
             return False
-        # Fall back on shape: several measures and at least one foreign key.
-        return len(classify(self)[1]) >= 2 and len(self.foreign_keys) >= 1
+        # No naming convention: a table with foreign keys and real measures is
+        # a fact. Real schemas rarely use fct_/dim_ prefixes.
+        keys = max(self.fk_like, len(self.foreign_keys))
+        return keys >= 1 and len(classify(self)[1]) >= 1
+
+
+def is_key_like(name: str) -> bool:
+    """True for identifiers, in snake_case or CamelCase."""
+    return bool(NOT_MEASURE.search(snake(name)))
+
+
+def is_pii_like(name: str) -> bool:
+    return bool(PII_HINTS.search(snake(name)))
 
 
 def classify(table: TableInfo) -> tuple[list[ColumnInfo], list[ColumnInfo]]:
-    """Split columns into (dimensions, measures)."""
+    """Split columns into (dimensions, measures). Never treat a key as a measure."""
     dims, measures = [], []
+    pk = (table.primary_key or "").lower()
     for c in table.columns:
         numeric = bool(NUMERIC_TYPES.search(c.data_type))
-        looks_like_measure = numeric and not NOT_MEASURE.search(c.name) and (
-            bool(MEASURE_HINTS.search(c.name)) or c.name.lower() != (table.primary_key or "")
-        )
-        if numeric and not NOT_MEASURE.search(c.name) and looks_like_measure:
+        dated = bool(DATE_TYPES.search(c.data_type))
+        if numeric and not dated and not is_key_like(c.name) and c.name.lower() != pk:
             measures.append(c)
         else:
             dims.append(c)
@@ -79,79 +130,134 @@ def classify(table: TableInfo) -> tuple[list[ColumnInfo], list[ColumnInfo]]:
 
 
 def _guess_primary_key(table: TableInfo) -> str | None:
-    names = [c.name.lower() for c in table.columns]
-    singular = table.name.lower()
-    for prefix in FACT_PREFIXES + DIM_PREFIXES:
-        singular = singular.removeprefix(prefix)
-    for candidate in (f"{singular}_id", f"{singular.rstrip('s')}_id", "id", f"{table.name}_id"):
-        if candidate in names:
-            return candidate
-    return names[0] if names else None
+    """Return the ORIGINAL column name - lowercasing it breaks case-sensitive SQL."""
+    by_snake = {snake(c.name): c.name for c in table.columns}
+    stem = snake(table.name)
+    for prefix in ("fct_", "fact_", "f_", "dim_", "d_"):
+        stem = stem.removeprefix(prefix)
+    candidates = (f"{stem}_id", f"{_singularise(stem)}_id", "id", f"{snake(table.name)}_id")
+    for cand in candidates:
+        if cand in by_snake:
+            return by_snake[cand]
+    return table.columns[0].name if table.columns else None
 
 
 def infer_joins(tables: list[TableInfo]) -> list[dict[str, str]]:
-    """Foreign keys where declared; otherwise match fact columns to dimension keys."""
+    """Foreign keys where declared; otherwise match key columns to table names.
+
+    Matching is done on snake(name) so CamelCase schemas work:
+    InvoiceLine.InvoiceId -> Invoice.InvoiceId.
+    """
     joins: list[dict[str, str]] = []
-    by_name = {t.name.lower(): t for t in tables}
+    by_stem: dict[str, TableInfo] = {}
+    for t in tables:
+        full = snake(t.name)
+        stripped = full
+        for prefix in FACT_PREFIXES + DIM_PREFIXES:
+            stripped = stripped.removeprefix(prefix)
+        for variant in (full, _singularise(full), stripped, _singularise(stripped)):
+            by_stem.setdefault(variant, t)
     seen: set[tuple[str, str]] = set()
 
     for t in tables:
         for col, ref_tbl, ref_col in t.foreign_keys:
-            key = (t.name.lower(), ref_tbl.lower())
-            if key in seen or ref_tbl.lower() not in by_name:
+            target = by_stem.get(snake(ref_tbl)) or by_stem.get(_singularise(snake(ref_tbl)))
+            if target is None:
+                continue
+            key = (t.name, target.name)
+            if key in seen:
                 continue
             seen.add(key)
-            joins.append({"left": t.name, "right": ref_tbl, "type": "left",
-                          "sql_on": f"{t.name}.{col} = {ref_tbl}.{ref_col}"})
+            joins.append({"left": t.name, "right": target.name, "type": "left",
+                          "sql_on": f"{t.name}.{col} = {target.name}.{ref_col}"})
 
     for t in tables:
-        if not t.is_fact:
-            continue
         for c in t.columns:
-            if not c.name.lower().endswith("_id"):
+            cs = snake(c.name)
+            if not cs.endswith("_id") or cs == "id":
                 continue
-            stem = c.name.lower()[:-3]
-            for cand in (f"dim_{stem}", f"dim_{stem}s", stem, f"{stem}s"):
-                other = by_name.get(cand)
-                if not other or other is t:
-                    continue
-                key = (t.name.lower(), other.name.lower())
-                if key in seen:
-                    continue
-                pk = other.primary_key or _guess_primary_key(other)
-                if pk and pk.lower() == c.name.lower():
-                    seen.add(key)
-                    joins.append({"left": t.name, "right": other.name, "type": "left",
-                                  "sql_on": f"{t.name}.{c.name} = {other.name}.{pk}"})
-                break
+            stem = cs[:-3]
+            target = by_stem.get(stem) or by_stem.get(_singularise(stem))
+            if target is None or target is t:
+                continue
+            key = (t.name, target.name)
+            if key in seen:
+                continue
+            pk = target.primary_key or _guess_primary_key(target)
+            if not pk:
+                continue
+            # Only join when the target key actually matches the referencing column.
+            if snake(pk) not in (cs, f"{stem}_id", "id"):
+                continue
+            seen.add(key)
+            joins.append({"left": t.name, "right": target.name, "type": "left",
+                          "sql_on": f"{t.name}.{c.name} = {target.name}.{pk}"})
     return joins
 
 
+def count_fk_like(table: TableInfo, tables: list[TableInfo]) -> int:
+    """How many of this table's columns point at another table in the schema."""
+    stems = set()
+    for t in tables:
+        full = snake(t.name)
+        stripped = full
+        for prefix in FACT_PREFIXES + DIM_PREFIXES:
+            stripped = stripped.removeprefix(prefix)
+        stems.update({full, _singularise(full), stripped, _singularise(stripped)})
+    n = 0
+    for c in table.columns:
+        cs = snake(c.name)
+        if cs.endswith("_id") and cs != "id":
+            stem = cs[:-3]
+            if (stem in stems or _singularise(stem) in stems) and stem != snake(table.name):
+                n += 1
+    return n
+
+
 def propose_metrics(tables: list[TableInfo]) -> list[dict[str, Any]]:
+    """Draft one metric per measure, plus a count per fact table.
+
+    Names are namespaced by entity: two tables both having UnitPrice would
+    otherwise generate the same metric name twice and silently collide when
+    the layer is loaded into a dict.
+    """
     metrics: list[dict[str, Any]] = []
+    used: set[str] = set()
+
+    def unique(name: str) -> str:
+        candidate, n = name, 2
+        while candidate in used:
+            candidate = f"{name}_{n}"
+            n += 1
+        used.add(candidate)
+        return candidate
+
     for t in tables:
         if not t.is_fact:
             continue
+        entity_stem = snake(t.name)
         _, measures = classify(t)
         for m in measures:
-            label = m.name.replace("_", " ").title()
+            label = snake(m.name).replace("_", " ").title()
             metrics.append({
-                "name": f"total_{m.name}",
+                "name": unique(f"{entity_stem}_{snake(m.name)}"),
                 "label": f"Total {label}",
                 "description": f"REVIEW: sum of {t.name}.{m.name}. "
-                               f"Add any mandatory filters (e.g. excluding cancelled rows).",
+                               f"Add any mandatory filters (e.g. excluding cancelled rows), "
+                               f"and check this measure is additive at this grain.",
                 "entity": t.name,
                 "expression": f"SUM({t.name}.{m.name})",
                 "filters": [],
                 "format": "currency" if re.search(
-                    r"(revenue|amount|price|cost|sales|margin|profit|spend)", m.name, re.I
+                    r"(revenue|amount|price|cost|sales|margin|profit|spend|total)",
+                    snake(m.name), re.I,
                 ) else "number",
             })
         pk = t.primary_key or _guess_primary_key(t)
         if pk:
             metrics.append({
-                "name": f"{t.name}_count",
-                "label": f"{t.name.replace('_', ' ').title()} Count",
+                "name": unique(f"{entity_stem}_count"),
+                "label": f"{snake(t.name).replace('_', ' ').title()} Count",
                 "description": f"REVIEW: distinct count of {t.name}.{pk}.",
                 "entity": t.name,
                 "expression": f"COUNT(DISTINCT {t.name}.{pk})",
@@ -182,6 +288,8 @@ def to_yaml(tables: list[TableInfo], *, include: list[str] | None = None) -> str
     import yaml
 
     chosen = [t for t in tables if not include or t.name in include]
+    for t in chosen:
+        t.fk_like = count_fk_like(t, chosen)
     entities = []
     for t in chosen:
         if not t.primary_key:
@@ -195,7 +303,9 @@ def to_yaml(tables: list[TableInfo], *, include: list[str] | None = None) -> str
             "primary_key": t.primary_key or "",
             "dimensions": [
                 {"name": c.name, "type": c.data_type.lower(),
-                 "description": f"REVIEW: {c.name.replace('_', ' ')}."}
+                 "description": ("LIKELY PERSONAL DATA - delete unless needed. "
+                                 if is_pii_like(c.name) else "REVIEW: ")
+                                + snake(c.name).replace("_", " ") + "."}
                 for c in dims
             ],
             "measures": [

@@ -87,11 +87,13 @@ def test_declared_foreign_keys_win():
 def test_metrics_are_proposed_and_flagged_for_review():
     metrics = propose_metrics([_fact(), _dim()])
     names = {m["name"] for m in metrics}
-    assert "total_net_revenue" in names
+    # Metric names are namespaced by entity so two tables with a UnitPrice
+    # column cannot silently collide into one definition.
+    assert "fct_orders_net_revenue" in names
     assert "fct_orders_count" in names
     # Definitions are business decisions; every draft must say so.
     assert all("REVIEW" in m["description"] for m in metrics)
-    revenue = next(m for m in metrics if m["name"] == "total_net_revenue")
+    revenue = next(m for m in metrics if m["name"] == "fct_orders_net_revenue")
     assert revenue["format"] == "currency"
 
 
@@ -103,7 +105,7 @@ def test_generated_yaml_loads_as_a_semantic_layer(tmp_path):
     path.write_text(to_yaml([_fact(), _dim()]))
     sl = load_semantic_layer(str(path), dbt_path=str(tmp_path / "missing.yml"))
     assert "fct_orders" in sl.entities
-    assert "total_net_revenue" in sl.metrics
+    assert "fct_orders_net_revenue" in sl.metrics
     assert sl.join_clause("fct_orders", "dim_products") is not None
 
 
@@ -206,3 +208,49 @@ def test_cli_ask_json_output(monkeypatch, warehouse, retriever, capsys):
     main(["ask", "revenue by region", "--no-llm", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "answered" and payload["sql"]
+
+
+def test_metric_names_are_unique_across_tables():
+    """Two tables sharing a column name must not collide into one metric."""
+    a = TableInfo(name="InvoiceLine", columns=[
+        ColumnInfo("InvoiceLineId", "INTEGER"), ColumnInfo("InvoiceId", "INTEGER"),
+        ColumnInfo("UnitPrice", "NUMERIC"), ColumnInfo("Quantity", "INTEGER")],
+        primary_key="InvoiceLineId")
+    b = TableInfo(name="Track", columns=[
+        ColumnInfo("TrackId", "INTEGER"), ColumnInfo("AlbumId", "INTEGER"),
+        ColumnInfo("UnitPrice", "NUMERIC")], primary_key="TrackId")
+    a.fk_like = b.fk_like = 1
+    names = [m["name"] for m in propose_metrics([a, b])]
+    assert len(names) == len(set(names)), names
+    assert "invoice_line_unit_price" in names and "track_unit_price" in names
+
+
+def test_camelcase_keys_are_never_measures():
+    """The regression that shipped: SUM(TrackId) on a real customer schema."""
+    t = TableInfo(name="InvoiceLine", columns=[
+        ColumnInfo("InvoiceLineId", "INTEGER"), ColumnInfo("InvoiceId", "INTEGER"),
+        ColumnInfo("TrackId", "INTEGER"), ColumnInfo("UnitPrice", "NUMERIC(10,2)"),
+        ColumnInfo("Quantity", "INTEGER")], primary_key="InvoiceLineId")
+    _, measures = classify(t)
+    assert {c.name for c in measures} == {"UnitPrice", "Quantity"}
+
+
+def test_camelcase_joins_and_case_preserved():
+    inv_line = TableInfo(name="InvoiceLine", columns=[
+        ColumnInfo("InvoiceLineId", "INTEGER"), ColumnInfo("InvoiceId", "INTEGER")],
+        primary_key="InvoiceLineId")
+    inv = TableInfo(name="Invoice", columns=[
+        ColumnInfo("InvoiceId", "INTEGER"), ColumnInfo("Total", "NUMERIC")],
+        primary_key="InvoiceId")
+    joins = infer_joins([inv_line, inv])
+    assert joins[0]["sql_on"] == "InvoiceLine.InvoiceId = Invoice.InvoiceId"
+
+
+def test_pii_columns_are_flagged_not_deleted():
+    t = TableInfo(name="Customer", columns=[
+        ColumnInfo("CustomerId", "INTEGER"), ColumnInfo("Email", "VARCHAR"),
+        ColumnInfo("Phone", "VARCHAR"), ColumnInfo("Country", "VARCHAR")],
+        primary_key="CustomerId")
+    text = to_yaml([t])
+    assert "LIKELY PERSONAL DATA" in text
+    assert "Email" in text  # surfaced for a human to remove, never hidden silently
