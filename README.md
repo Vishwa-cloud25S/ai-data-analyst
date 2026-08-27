@@ -129,6 +129,30 @@ request — the backend is best-effort by design.
 `tests/test_validator.py` fires 19 hostile queries at the validator on every push and CI
 fails if a single one gets through.
 
+## Point it at your own data
+
+```bash
+pip install -e .
+ai-analyst init --duckdb ./your.duckdb --exclude hr_salaries   # draft a semantic layer
+$EDITOR semantic_layer.yml                                     # review: the one human step
+ai-analyst check                                               # verify it against the warehouse
+ai-analyst ask "what were our highest revenue products last quarter?" --trace
+ai-analyst serve
+```
+
+`init` introspects DuckDB, PostgreSQL or a **dbt `manifest.json`**, classifies columns
+into dimensions and measures, infers joins from foreign keys (or naming when none are
+declared), and proposes metrics — every one flagged `REVIEW`, because
+`SUM(unit_price)` is meaningless and revenue almost certainly needs a
+`status NOT IN ('cancelled','returned')` filter. Metric definitions are business
+decisions; the generator drafts, a human signs off.
+
+`check` executes every declared entity and metric against the live warehouse, so a
+broken definition or schema drift fails loudly instead of at demo time. Put it in CI.
+
+See [docs/ONBOARDING.md](docs/ONBOARDING.md) for the full path from a customer's
+warehouse to a served answer.
+
 ## Quick start
 
 ```bash
@@ -226,16 +250,17 @@ already write becomes the context the model reasons over.
 
 ```
 app/
+  cli.py        init · check · ask · keygen · serve
   api/          FastAPI routes + pydantic contracts
   core/         settings · API-key auth & roles · audit log
   db/seed.py    deterministic synthetic warehouse
   llm/          OpenAI wrapper with offline fallback
   pipeline/     intent · retrieval(RAG) · generator · validator ·
                 executor · result_validator · explainer · orchestrator
-  semantic/     semantic_layer.yml + loader
+  semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          177 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          194 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -244,7 +269,7 @@ tests/          177 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 177 tests, no network required
+make test        # 194 tests, no network required
 make lint
 ```
 

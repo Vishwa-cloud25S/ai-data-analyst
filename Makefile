@@ -15,6 +15,12 @@ api: seed ## Run the FastAPI service on :8000
 ui: ## Run the Streamlit app on :8501
 	streamlit run ui/streamlit_app.py --server.address=0.0.0.0 --server.port=8501
 
+check: ## Verify the semantic layer against the warehouse
+	python -m app.cli check
+
+bootstrap: ## Draft a semantic layer from the local warehouse
+	python -m app.cli init --duckdb data/warehouse.duckdb -o semantic_layer.draft.yml
+
 test: ## Run the test suite
 	pytest -q --cov=app --cov-report=term-missing
 

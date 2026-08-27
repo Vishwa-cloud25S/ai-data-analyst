@@ -40,6 +40,12 @@ jobs:
         env:
           OPENAI_API_KEY: ""
         run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml
+      - name: Semantic layer executes against the warehouse
+        run: |
+          python -m app.db.seed
+          python -m app.cli check
+      - name: CLI smoke test
+        run: python -m app.cli ask "revenue by region" --no-llm
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4

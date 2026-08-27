@@ -20,3 +20,5 @@ data/audit.sqlite
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+semantic_layer.draft.yml
+semantic_layer.yml
