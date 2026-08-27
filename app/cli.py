@@ -22,7 +22,12 @@ from pathlib import Path
 def _cmd_init(args: argparse.Namespace) -> int:
     from app.semantic import bootstrap
 
-    if args.dbt:
+    if args.url:
+        from app.db.connectors import introspect_sqlalchemy
+
+        tables = introspect_sqlalchemy(args.url, schema=args.schema)
+        source = f"{args.url.split('://')[0]} warehouse"
+    elif args.dbt:
         tables = bootstrap.from_dbt_manifest(args.dbt, schema=args.schema or "main")
         source = f"dbt manifest {args.dbt}"
     elif args.postgres:
@@ -174,6 +179,8 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--duckdb", help="path to a DuckDB file")
     src.add_argument("--postgres", help="PostgreSQL DSN")
     src.add_argument("--dbt", help="path to dbt target/manifest.json")
+    src.add_argument("--url", help="any SQLAlchemy URL (Snowflake, BigQuery, "
+                                   "Databricks, MySQL, Redshift, Trino)")
     i.add_argument("--schema", help="schema to introspect")
     i.add_argument("--include", help="comma-separated table allow-list")
     i.add_argument("--exclude", help="comma-separated tables to leave out entirely")

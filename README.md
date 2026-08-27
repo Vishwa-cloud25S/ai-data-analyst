@@ -264,7 +264,7 @@ app/
   semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          198 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          214 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -273,7 +273,7 @@ tests/          198 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 198 tests, no network required
+make test        # 214 tests, no network required
 make lint
 ```
 
@@ -294,6 +294,23 @@ both that a legitimate question is `answered` and that `drop table fct_orders` i
   blocked it and the full trace, not a shrug.
 - **Trust boundary is one process.** Streamlit talks HTTP to FastAPI; it holds no
   credentials and no database driver.
+
+## Warehouses
+
+DuckDB and PostgreSQL have native executors. Everything else goes through
+SQLAlchemy with one `WAREHOUSE_URL`:
+
+```bash
+WAREHOUSE_URL="snowflake://user:pw@account/db/schema?warehouse=WH&role=ANALYST_RO"
+WAREHOUSE_URL="bigquery://project/dataset"
+WAREHOUSE_URL="databricks://token:<pat>@host?http_path=/sql/1.0/warehouses/<id>"
+WAREHOUSE_URL="mysql+pymysql://readonly:pw@host/db"
+```
+
+The SQL dialect follows the connection, so sqlglot renders and validates against
+the right grammar. Where the engine supports it the session is also set read-only
+with a statement timeout — but **the credential should be a read-only role at the
+database**. Everything else is defence in depth. See [SECURITY.md](SECURITY.md).
 
 ## Deploying
 
@@ -320,6 +337,17 @@ docker compose up --build          # API :8000, UI :8501
 
 The container seeds its own DuckDB warehouse on start, so a fresh deploy is
 answering questions within seconds of boot with no external database required.
+
+## For evaluators and buyers
+
+| | |
+|---|---|
+| [docs/PITCH.md](docs/PITCH.md) | One page: the problem, why this differs, honest limitations |
+| [SECURITY.md](SECURITY.md) | Threat model, controls, and what this does *not* protect against |
+| [docs/ONBOARDING.md](docs/ONBOARDING.md) | Warehouse to served answer, with a production checklist |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | Ten-minute walkthrough |
+| [docs/CASE_STUDY_CHINOOK.md](docs/CASE_STUDY_CHINOOK.md) | What broke on an unfamiliar schema, and why |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Licence
 

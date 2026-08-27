@@ -114,7 +114,13 @@ def validate_sql(
         return ValidationResult(False, sql, errors, warnings, checks=checks)
 
     # --- tables ---
-    tables = sorted({_table_key(t) for t in tree.find_all(exp.Table) if t.name})
+    # Keep the name as the author wrote it for error messages: telling someone
+    # "customer" is not allowed when they wrote "Customer" reads like a bug.
+    original_case: dict[str, str] = {}
+    for t in tree.find_all(exp.Table):
+        if t.name:
+            original_case.setdefault(_table_key(t), t.name)
+    tables = sorted(original_case)
     allowed = sl.allowed_tables
     # CTE names are legal virtual tables.
     cte_names = {c.alias_or_name.lower() for c in tree.find_all(exp.CTE)}
@@ -125,7 +131,8 @@ def validate_sql(
     checks["tables_allowed"] = not bad_tables
     if bad_tables:
         errors.append(
-            "Table(s) not in the semantic layer: " + ", ".join(sorted(bad_tables))
+            "Table(s) not in the semantic layer: "
+            + ", ".join(original_case.get(t, t) for t in sorted(bad_tables))
             + ". Allowed: " + ", ".join(sorted(e.name for e in sl.entities.values()))
         )
     sys_tables = [t for t in tables if t.startswith(BANNED_TABLE_PREFIXES)]

@@ -120,6 +120,11 @@ class PostgresExecutor:
 
 
 def get_executor():
+    """Pick the executor. An explicit WAREHOUSE_URL always wins."""
+    if settings.warehouse_url:
+        from app.db.connectors import SQLAlchemyExecutor
+
+        return SQLAlchemyExecutor()
     if settings.warehouse == "postgres":
         return PostgresExecutor()
     return DuckDBExecutor()

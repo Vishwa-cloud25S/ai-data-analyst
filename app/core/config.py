@@ -15,9 +15,15 @@ class Settings(BaseSettings):
     environment: str = "local"
 
     # --- warehouse ---
-    warehouse: Literal["duckdb", "postgres"] = "duckdb"
+    warehouse: Literal["duckdb", "postgres", "sqlalchemy"] = "duckdb"
     duckdb_path: str = str(ROOT / "data" / "warehouse.duckdb")
     postgres_dsn: str = "postgresql://analyst:analyst@localhost:5432/warehouse"
+    # Any SQLAlchemy URL: Snowflake, BigQuery, Databricks, MySQL, Redshift, Trino.
+    # Setting this switches the warehouse to the generic connector.
+    #   snowflake://user:pw@account/db/schema?warehouse=WH&role=ANALYST_RO
+    #   bigquery://project/dataset
+    #   databricks://token:<pat>@host?http_path=/sql/1.0/warehouses/<id>
+    warehouse_url: str = ""
 
     # --- LLM ---
     # provider: auto (openai if a key is set) | openai | local | none

@@ -39,7 +39,8 @@ def health() -> HealthResponse:
     sl = get_retriever().sl
     return HealthResponse(
         status="ok",
-        warehouse=settings.warehouse,
+        warehouse=(settings.warehouse_url.split("://")[0]
+                   if settings.warehouse_url else settings.warehouse),
         llm=get_llm().describe(),
         llm_provider=get_llm().provider,
         entities=len(sl.entities),
@@ -120,9 +121,10 @@ def validate(
     principal: Principal = Depends(require("analyst")),
 ) -> ValidateResponse:
     """Expose the guardrail directly so it can be tested / audited in isolation."""
+    from app.pipeline.executor import get_executor
+
     vr = validate_sql(
-        req.sql, get_retriever().sl,
-        dialect=settings.warehouse if settings.warehouse != "postgres" else "postgres",
+        req.sql, get_retriever().sl, dialect=get_executor().engine,
         max_rows=settings.max_rows, max_joins=settings.max_joins,
     )
     return ValidateResponse(ok=vr.ok, sql=vr.sql, errors=vr.errors, warnings=vr.warnings,
