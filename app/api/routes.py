@@ -41,7 +41,11 @@ def semantic_layer() -> dict:
 
 @router.post("/ask", response_model=AskResponse, tags=["analyst"])
 def ask(req: AskRequest) -> AskResponse:
-    analyst = get_analyst() if req.use_llm else Analyst(use_llm=False)
+    analyst = get_analyst()
+    if not req.use_llm:
+        # Reuse the configured executor/retriever; only the LLM is switched off.
+        analyst = Analyst(executor=analyst.executor, retriever=analyst.retriever,
+                          use_llm=False)
     try:
         result = analyst.ask(req.question)
     except Exception as exc:  # pragma: no cover - defensive

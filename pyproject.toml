@@ -16,7 +16,8 @@ exclude = ["dbt/target", ".venv", "data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]
-ignore = ["B008", "E501"]
+# UP038 is deprecated upstream and isinstance tuples read better here.
+ignore = ["B008", "E501", "UP038"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
