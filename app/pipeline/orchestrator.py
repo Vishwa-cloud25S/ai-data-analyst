@@ -77,18 +77,16 @@ class AnalysisResult:
 
 
 OUT_OF_SCOPE = (
-    "That question does not map to anything in the semantic layer, so I will not "
-    "guess at an answer. I can report on revenue, margin, units, orders, average "
-    "order value, return rate and active customers, broken down by product, "
-    "category, brand, region, channel, customer segment or country. "
-    "Ask '/examples' or 'what metrics do you have?' for concrete examples."
+    "That is not something I can answer from the sales data, and I will not guess. "
+    "Available metrics: revenue, margin, units, orders, average order value, "
+    "return rate, active customers - by product, category, brand, region, channel, "
+    "segment or country."
 )
 
 REFUSAL = (
-    "I can only answer questions about the certified sales and revenue data "
-    "exposed through the semantic layer (orders, products, customers). "
-    "I cannot access other tables, run write operations, or answer questions "
-    "outside that scope."
+    "I will not run that. I answer read-only questions about the certified sales "
+    "data only - orders, products and customers - and nothing else in the "
+    "warehouse is reachable from here."
 )
 
 

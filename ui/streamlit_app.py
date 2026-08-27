@@ -55,20 +55,31 @@ with st.sidebar:
 
     st.caption(f"API: `{API_URL}`")
     api_ok = False
+    health: dict = {}
     try:
         health = client.health()
         api_ok = True
         st.success("API healthy")
-        c1, c2 = st.columns(2)
-        c1.metric("Warehouse", health["warehouse"])
-        c2.metric("Model", health["llm"])
-        st.caption(f"{health['entities']} entities · "
-                   f"{health['metrics']} certified metrics")
+        llm_name = health["llm"]
+        st.markdown(
+            f"**Warehouse** `{health['warehouse']}`  \n"
+            f"**Model** `{llm_name}`  \n"
+            f"{health['entities']} entities · {health['metrics']} certified metrics"
+        )
     except ApiError as exc:
         st.error(str(exc))
 
-    use_llm = st.toggle("Use LLM", value=True,
-                        help="Off = deterministic planner only (no API calls).")
+    llm_configured = api_ok and health.get("llm") != "offline-rules"
+    if llm_configured:
+        use_llm = st.toggle("Use LLM", value=True,
+                            help="Off = deterministic planner only (no API calls).")
+    else:
+        use_llm = False
+        st.toggle("Use LLM", value=False, disabled=True,
+                  help="No OPENAI_API_KEY configured on the API, so the "
+                       "deterministic planner handles every question. Set the key "
+                       "and restart the API to enable the LLM path.")
+        st.caption("Running keyless on the deterministic planner.")
 
     st.divider()
     st.subheader("Guardrails")
