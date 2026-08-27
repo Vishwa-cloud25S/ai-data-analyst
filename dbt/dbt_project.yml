@@ -1,0 +1,10 @@
+name: ai_data_analyst
+version: "1.0.0"
+config-version: 2
+profile: ai_data_analyst
+model-paths: ["models"]
+target-path: "target"
+models:
+  ai_data_analyst:
+    marts:
+      +materialized: table

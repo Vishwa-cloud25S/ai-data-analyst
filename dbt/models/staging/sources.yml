@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: Landing zone loaded by the ingestion jobs.
+    tables:
+      - name: orders
+        loaded_at_field: _loaded_at
+        freshness:
+          warn_after: {count: 6, period: hour}
+          error_after: {count: 24, period: hour}
+      - name: order_lines
+      - name: products
+      - name: customers

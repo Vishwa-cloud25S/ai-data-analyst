@@ -1,0 +1,66 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: >
+      Order line grain fact table. Built from stg_orders joined to stg_order_lines.
+      Business owner is the Revenue Analytics team. Refreshed hourly.
+      Cancelled and returned lines are retained but must be excluded from revenue metrics.
+    meta:
+      owner: revenue-analytics
+      maturity: certified
+      refresh: hourly
+    columns:
+      - name: order_line_id
+        description: Surrogate key of the order line.
+        tests: [unique, not_null]
+      - name: order_id
+        description: Parent order id.
+        tests: [not_null]
+      - name: order_date
+        description: Date the order was placed. Canonical date field for revenue reporting.
+      - name: order_status
+        description: Lifecycle status; one of placed, shipped, delivered, returned, cancelled.
+      - name: channel
+        description: Acquisition/sales channel; one of web, mobile, retail, partner.
+      - name: region
+        description: Ship-to region; one of NA, EMEA, APAC, LATAM.
+      - name: net_revenue
+        description: quantity * unit_price - discount_amount, in USD. Never sum unit_price directly.
+      - name: cost_amount
+        description: Cost of goods sold for the line, in USD.
+
+  - name: dim_products
+    description: >
+      Product dimension, one row per SKU. Source of truth for product_name, category and brand.
+    meta:
+      owner: catalog-team
+      maturity: certified
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+      - name: product_name
+        description: Marketing name of the product.
+      - name: category
+        description: One of Audio, Computing, Wearables, Home, Accessories.
+      - name: brand
+        description: Brand the SKU belongs to.
+
+  - name: dim_customers
+    description: Customer dimension, one row per customer account.
+    meta:
+      owner: crm-team
+      maturity: certified
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: segment
+        description: One of Consumer, SMB, Enterprise.
+      - name: country
+        description: ISO-3166 alpha-2 country code.
+
+exposures:
+  - name: revenue_dashboard
+    type: dashboard
+    description: Weekly revenue review. Uses total_revenue by product and region.
+    depends_on: [ref('fct_orders'), ref('dim_products')]
