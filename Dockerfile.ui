@@ -6,16 +6,17 @@ WORKDIR /srv
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir streamlit==1.41.1 plotly==5.24.1 pandas==2.2.3 requests==2.32.3
+COPY requirements-ui.txt .
+RUN pip install --no-cache-dir -r requirements-ui.txt
 
 COPY ui ./ui
 
 RUN useradd -m -u 10002 viewer
 USER viewer
 
+ENV PORT=8501
 EXPOSE 8501
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT}/_stcore/health" || exit 1
 
-CMD ["streamlit", "run", "ui/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["sh", "-c", "exec streamlit run ui/streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT} --server.headless=true --browser.gatherUsageStats=false"]

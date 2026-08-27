@@ -202,7 +202,9 @@ both that a legitimate question is `answered` and that `drop table fct_orders` i
 ## Deploying
 
 **Render** (both services, free tier) - `render.yaml` is a blueprint:
-push the repo, then Render → New → Blueprint → select it. The UI is wired to the
+push the repo, then Render → New → Blueprint → select it. Both images honour
+`$PORT`, and the API bakes its warehouse at build time so it binds immediately
+instead of seeding on every cold start. The UI is wired to the
 API over the private network automatically. Set `OPENAI_API_KEY` on the API service
 if you want the LLM path; it runs without one.
 
