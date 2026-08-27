@@ -17,6 +17,17 @@ from app.semantic.layer import SemanticLayer, get_semantic_layer
 
 _TOKEN = re.compile(r"[a-z0-9]+")
 
+# Stopwords are excluded from the index and from scope checks: without this a
+# question like "what is the weather" scores well purely on "what"/"is"/"the".
+STOPWORDS = frozenset("""
+a an the and or of in on at to for from by with is are was were be been being
+do does did doing what which who whom whose when where why how me my we our us
+you your it its this that these those there here as if then than so such can
+could should would may might must will shall have has had show give tell list
+about into over under between per each all any some more most many much number
+i want need like get see look find please
+""".split())
+
 SYNONYMS = {
     "revenue": ["sales", "turnover", "income", "gmv", "money", "earned", "top", "highest"],
     "product": ["sku", "item", "goods"],
@@ -29,8 +40,20 @@ SYNONYMS = {
 }
 
 
+def _singular(tok: str) -> str:
+    """Crude but predictable de-pluralisation: categories->category, orders->order."""
+    if len(tok) > 4 and tok.endswith("ies"):
+        return tok[:-3] + "y"
+    if len(tok) > 3 and tok.endswith("es") and tok[-3] in "sxzh":
+        return tok[:-2]
+    if len(tok) > 3 and tok.endswith("s") and not tok.endswith("ss"):
+        return tok[:-1]
+    return tok
+
+
 def tokenize(text: str) -> list[str]:
-    toks = _TOKEN.findall(text.lower())
+    toks = [t for t in _TOKEN.findall(text.lower()) if t not in STOPWORDS]
+    toks = [_singular(t) for t in toks]
     out = list(toks)
     for tok in toks:
         for canon, alts in SYNONYMS.items():
@@ -89,6 +112,8 @@ def build_documents(sl: SemanticLayer) -> list[Doc]:
 class SchemaRetriever:
     """TF-IDF cosine retriever with entity/metric expansion."""
 
+    _vocab: set[str] | None = None
+
     def __init__(self, sl: SemanticLayer | None = None):
         self.sl = sl or get_semantic_layer()
         self.docs = build_documents(self.sl)
@@ -116,6 +141,51 @@ class SchemaRetriever:
                 hits.append(Hit(doc, dot / (qnorm * self.norms[i])))
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:top_k]
+
+    # ------------------------------------------------------------------
+    @property
+    def vocabulary(self) -> set[str]:
+        """Every content word the semantic layer legitimately answers about.
+
+        Built from entity names, column names, metric names/labels and their
+        synonyms. A question sharing no term with this set cannot be about the
+        published data, however confident the model might be.
+        """
+        if getattr(self, "_vocab", None) is not None:
+            return self._vocab
+        vocab: set[str] = set()
+
+        def add(text: str) -> None:
+            vocab.update(tokenize(text))
+
+        for e in self.sl.entities.values():
+            add(e.name.replace("_", " "))
+            for c in e.columns:
+                add(c.name.replace("_", " "))
+        for m in self.sl.metrics.values():
+            add(m.name.replace("_", " "))
+            add(m.label)
+        # Business vocabulary that maps onto the above.
+        for canon, alts in SYNONYMS.items():
+            add(canon)
+            for a in alts:
+                add(a)
+        vocab -= STOPWORDS
+        # Terms too generic to signal scope on their own.
+        vocab -= {"id", "name", "amount", "date", "type", "value", "count", "total",
+                  "top", "highest", "best", "rate", "active", "status", "list",
+                  "average", "unique", "line", "share", "day", "week", "year"}
+        self._vocab = vocab
+        return vocab
+
+    def scope_check(self, question: str) -> tuple[bool, list[str]]:
+        """Return (in_scope, matched_terms) for a question.
+
+        Guards the failure mode where an unrelated question silently falls
+        through to the default metric and gets answered with a real number.
+        """
+        terms = sorted(set(tokenize(question)) & self.vocabulary)
+        return bool(terms), terms
 
     def retrieve_context(self, question: str, top_k: int | None = None) -> dict:
         """Return the pruned schema slice that will be shown to the LLM."""

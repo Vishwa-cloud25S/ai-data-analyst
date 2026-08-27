@@ -76,6 +76,14 @@ class AnalysisResult:
         }
 
 
+OUT_OF_SCOPE = (
+    "That question does not map to anything in the semantic layer, so I will not "
+    "guess at an answer. I can report on revenue, margin, units, orders, average "
+    "order value, return rate and active customers, broken down by product, "
+    "category, brand, region, channel, customer segment or country. "
+    "Ask '/examples' or 'what metrics do you have?' for concrete examples."
+)
+
 REFUSAL = (
     "I can only answer questions about the certified sales and revenue data "
     "exposed through the semantic layer (orders, products, customers). "
@@ -112,11 +120,25 @@ class Analyst:
                 issues=[intent.reason],
             )
 
-        # 2 - schema retrieval (RAG) -------------------------------------
+        # 2 - schema retrieval (RAG) + scope gate -------------------------
         t0 = time.perf_counter()
+        in_scope, matched = self.retriever.scope_check(question)
         context = self.retriever.retrieve_context(question)
-        stage("schema_retrieval", "ok", t0, entities=context["entities"],
-              metrics=context["metrics"], hits=context["hits"])
+        gate_applies = intent.intent != "metadata"
+        stage("schema_retrieval", "ok" if (in_scope or not gate_applies) else "blocked", t0,
+              in_scope=in_scope, matched_terms=matched,
+              entities=context["entities"], metrics=context["metrics"],
+              hits=context["hits"])
+
+        if not in_scope and intent.intent != "metadata":
+            # Nothing in the question maps to the semantic layer. Without this
+            # gate the pipeline would fall back to the default metric and answer
+            # an unrelated question with a real, confidently wrong number.
+            return AnalysisResult(
+                request_id, question, "refused", OUT_OF_SCOPE, None, {"type": "table"},
+                [], [], 0, 0.0, intent.dict(), trace,
+                issues=["No term in the question maps to the semantic layer."],
+            )
 
         if intent.intent == "metadata":
             answer = self._describe_schema(context)
