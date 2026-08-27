@@ -1,21 +1,3 @@
-import pytest
-from fastapi.testclient import TestClient
-
-
-@pytest.fixture(scope="module")
-def client(warehouse, retriever):
-    import app.pipeline.orchestrator as orch
-    from app.main import app as fastapi_app
-    from app.pipeline.executor import DuckDBExecutor
-    from app.pipeline.orchestrator import Analyst
-
-    orch._analyst = Analyst(
-        executor=DuckDBExecutor(path=warehouse), retriever=retriever, use_llm=False
-    )
-    with TestClient(fastapi_app) as c:
-        yield c
-
-
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200

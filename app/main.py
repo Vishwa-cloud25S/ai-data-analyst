@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import router
 from app.core.config import settings
+from app.core.security import verify_startup_config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,6 +59,16 @@ async def request_logger(request: Request, call_next):
 async def unhandled(request: Request, exc: Exception):  # pragma: no cover
     log.exception("unhandled error")
     return JSONResponse(status_code=500, content={"detail": "Internal error"})
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    # Refuse to serve an unauthenticated API when auth was meant to be on.
+    verify_startup_config()
+    log.info(
+        "auth_enabled=%s audit_enabled=%s warehouse=%s",
+        settings.auth_enabled, settings.audit_enabled, settings.warehouse,
+    )
 
 
 app.include_router(router)

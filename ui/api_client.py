@@ -37,14 +37,19 @@ def normalise_base_url(url: str) -> str:
 class ApiClient:
     base_url: str
     timeout: int = 120
+    api_key: str | None = None
 
     def __post_init__(self) -> None:
         self.base_url = normalise_base_url(self.base_url)
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url.rstrip('/')}{path}"
+        headers = dict(kwargs.pop("headers", {}) or {})
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
         try:
-            resp = requests.request(method, url, timeout=self.timeout, **kwargs)
+            resp = requests.request(method, url, timeout=self.timeout,
+                                    headers=headers, **kwargs)
         except requests.exceptions.ConnectionError as exc:
             raise ApiError(
                 f"Cannot reach the API at {self.base_url}. Is it running?\n\n"
@@ -62,6 +67,13 @@ class ApiClient:
                 detail = resp.json().get("detail", "")
             except Exception:
                 detail = (resp.text or "")[:200]
+            if resp.status_code == 401:
+                raise ApiError(
+                    "The API rejected the credentials. Set API_KEY for this UI to a "
+                    "key configured in the API's API_KEYS."
+                )
+            if resp.status_code == 403:
+                raise ApiError(f"Not permitted: {detail or 'insufficient role'}.")
             if resp.status_code == 404:
                 raise ApiError(
                     f"{url} returned 404 Not Found.\n\n"

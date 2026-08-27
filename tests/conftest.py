@@ -74,3 +74,25 @@ def live_api_url(warehouse, retriever):
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(timeout=10)
+
+
+@pytest.fixture
+def client(warehouse, retriever, tmp_path, monkeypatch):
+    """TestClient with auth disabled (the local-development posture)."""
+    from fastapi.testclient import TestClient
+
+    import app.pipeline.orchestrator as orch
+    from app.core.audit import AuditLog, set_audit_log
+    from app.core.config import settings
+    from app.main import app as fastapi_app
+    from app.pipeline.executor import DuckDBExecutor
+    from app.pipeline.orchestrator import Analyst
+
+    monkeypatch.setattr(settings, "auth_enabled", False)
+    set_audit_log(AuditLog(str(tmp_path / "audit.sqlite")))
+    orch._analyst = Analyst(
+        executor=DuckDBExecutor(path=warehouse), retriever=retriever, use_llm=False
+    )
+    with TestClient(fastapi_app) as c:
+        yield c
+    set_audit_log(None)

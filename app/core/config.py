@@ -27,6 +27,15 @@ class Settings(BaseSettings):
     # rule-based planner so the whole pipeline still runs offline / in CI.
     allow_offline_llm: bool = True
 
+    # --- auth ---
+    # "key1:admin:alice,key2:analyst:bob,key3:viewer:dashboard"
+    auth_enabled: bool = False
+    api_keys: str = ""
+
+    # --- audit ---
+    audit_enabled: bool = True
+    audit_db_path: str = str(ROOT / "data" / "audit.sqlite")
+
     # --- guardrails ---
     max_rows: int = 1000
     query_timeout_seconds: int = 20

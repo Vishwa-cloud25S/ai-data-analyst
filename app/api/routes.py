@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import logging
+import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.schemas import (
     AskRequest,
     AskResponse,
+    AuditStatsResponse,
     HealthResponse,
     ValidateRequest,
     ValidateResponse,
+    WhoAmIResponse,
 )
+from app.core.audit import AuditEvent, get_audit_log
 from app.core.config import settings
+from app.core.security import Principal, get_keyring, require
 from app.llm.client import get_llm
 from app.pipeline.orchestrator import Analyst, get_analyst, semantic_layer_summary
 from app.pipeline.retrieval import get_retriever
@@ -21,8 +26,16 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _client_ip(request: Request) -> str | None:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 @router.get("/health", response_model=HealthResponse, tags=["meta"])
 def health() -> HealthResponse:
+    """Unauthenticated on purpose: platform health checks must reach it."""
     sl = get_retriever().sl
     return HealthResponse(
         status="ok",
@@ -30,32 +43,81 @@ def health() -> HealthResponse:
         llm=settings.openai_model if get_llm().available else "offline-rules",
         entities=len(sl.entities),
         metrics=len(sl.metrics),
+        auth_enabled=settings.auth_enabled,
+        audit_enabled=settings.audit_enabled,
+    )
+
+
+@router.get("/whoami", response_model=WhoAmIResponse, tags=["meta"])
+def whoami(principal: Principal = Depends(require("viewer"))) -> WhoAmIResponse:
+    return WhoAmIResponse(
+        name=principal.name, role=principal.role,
+        authenticated=principal.authenticated,
     )
 
 
 @router.get("/semantic-layer", tags=["meta"])
-def semantic_layer() -> dict:
+def semantic_layer(principal: Principal = Depends(require("viewer"))) -> dict:
     """The full contract the LLM is allowed to see. Useful for debugging + docs."""
     return semantic_layer_summary()
 
 
 @router.post("/ask", response_model=AskResponse, tags=["analyst"])
-def ask(req: AskRequest) -> AskResponse:
+def ask(
+    req: AskRequest,
+    request: Request,
+    principal: Principal = Depends(require("viewer")),
+) -> AskResponse:
     analyst = get_analyst()
     if not req.use_llm:
         # Reuse the configured executor/retriever; only the LLM is switched off.
         analyst = Analyst(executor=analyst.executor, retriever=analyst.retriever,
                           use_llm=False)
+    started = time.perf_counter()
     try:
         result = analyst.ask(req.question)
     except Exception as exc:  # pragma: no cover - defensive
         log.exception("pipeline failure")
+        if settings.audit_enabled:
+            get_audit_log().record(AuditEvent(
+                request_id="-", principal=principal.name, role=principal.role,
+                question=req.question, status="error", client_ip=_client_ip(request),
+                issues=[str(exc)],
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            ))
         raise HTTPException(status_code=500, detail=f"Pipeline failure: {exc}") from exc
+
+    if settings.audit_enabled:
+        blocked = next((s.name for s in result.trace if s.status == "blocked"), None)
+        tables = next(
+            (s.detail.get("tables", []) for s in result.trace if s.name == "sql_validation"),
+            [],
+        )
+        get_audit_log().record(AuditEvent(
+            request_id=result.request_id,
+            principal=principal.name,
+            role=principal.role,
+            client_ip=_client_ip(request),
+            question=req.question,
+            status=result.status,
+            blocked_stage=blocked,
+            sql=result.sql,
+            tables=list(tables),
+            row_count=result.row_count,
+            confidence=result.confidence,
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            llm_used=req.use_llm and get_llm().available,
+            issues=result.issues,
+        ))
+
     return AskResponse(**result.dict())
 
 
 @router.post("/validate-sql", response_model=ValidateResponse, tags=["analyst"])
-def validate(req: ValidateRequest) -> ValidateResponse:
+def validate(
+    req: ValidateRequest,
+    principal: Principal = Depends(require("analyst")),
+) -> ValidateResponse:
     """Expose the guardrail directly so it can be tested / audited in isolation."""
     vr = validate_sql(
         req.sql, get_retriever().sl,
@@ -64,6 +126,33 @@ def validate(req: ValidateRequest) -> ValidateResponse:
     )
     return ValidateResponse(ok=vr.ok, sql=vr.sql, errors=vr.errors, warnings=vr.warnings,
                             tables=vr.tables, columns=vr.columns, checks=vr.checks)
+
+
+@router.get("/audit", tags=["audit"])
+def audit_events(
+    principal: Principal = Depends(require("admin")),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    status: str | None = Query(None, pattern="^(answered|refused|error)$"),
+    user: str | None = Query(None, max_length=120),
+    since: str | None = Query(None, description="ISO-8601 timestamp"),
+) -> dict:
+    """Who asked what, what SQL ran, and what was refused. Admin only."""
+    events = get_audit_log().query(
+        limit=limit, offset=offset, principal=user, status=status, since=since
+    )
+    return {"count": len(events), "events": events}
+
+
+@router.get("/audit/stats", response_model=AuditStatsResponse, tags=["audit"])
+def audit_stats(principal: Principal = Depends(require("admin"))) -> AuditStatsResponse:
+    return AuditStatsResponse(**get_audit_log().stats())
+
+
+@router.get("/principals", tags=["audit"])
+def principals(principal: Principal = Depends(require("admin"))) -> dict:
+    """Configured identities and roles. Never returns key material."""
+    return {"auth_enabled": settings.auth_enabled, "principals": get_keyring().describe()}
 
 
 @router.get("/examples", tags=["meta"])

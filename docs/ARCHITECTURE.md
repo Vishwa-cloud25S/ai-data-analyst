@@ -41,6 +41,30 @@ The LLM sits **outside** the trust boundary in both directions:
 it receives a pruned schema slice (never data, never credentials) and it emits a
 string that is treated as hostile until the validator says otherwise.
 
+## Access control
+
+```
+X-API-Key ──► KeyRing (sha256 digests, constant-time compare)
+                 │
+                 ▼
+            Principal(name, role)  viewer < analyst < admin
+                 │
+   ┌─────────────┼──────────────────────────┐
+   ▼             ▼                          ▼
+ /ask        /validate-sql        /audit · /audit/stats · /principals
+ viewer         analyst                     admin
+```
+
+`AUTH_ENABLED=true` with no `API_KEYS` raises at startup: an API that was meant to be
+authenticated must never come up open. `/health` stays public so platform health checks
+work.
+
+Every request - answered, refused or errored - is appended to a SQLite audit log with
+principal, role, client IP, question, status, blocking stage, executed SQL, tables
+touched, row count, confidence and duration. The log lives in its own database, because
+the warehouse connection is read-only and audit writes must never be able to reach
+business data.
+
 ## Request lifecycle
 
 ```

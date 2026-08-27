@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover
     from charts import build_figure
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_KEY = os.getenv("API_KEY") or None
 
 st.set_page_config(page_title="AI Data Analyst", page_icon="📊", layout="wide")
 
@@ -36,14 +37,14 @@ STAGE_LABELS = {
 STATUS_ICON = {"ok": "✅", "blocked": "🛑", "error": "❌", "skipped": "⏭️"}
 
 
-client = ApiClient(API_URL)
+client = ApiClient(API_URL, api_key=API_KEY)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def cached_get(path: str) -> dict:
     """Returns {"ok": bool, "data"|"error": ...} so callers must handle failure."""
     try:
-        return {"ok": True, "data": ApiClient(API_URL).get(path)}
+        return {"ok": True, "data": ApiClient(API_URL, api_key=API_KEY).get(path)}
     except ApiError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -66,6 +67,16 @@ with st.sidebar:
             f"**Model** `{llm_name}`  \n"
             f"{health['entities']} entities · {health['metrics']} certified metrics"
         )
+        if health.get("auth_enabled"):
+            who = cached_get("/whoami")
+            if who.get("ok"):
+                st.caption(f"Signed in as **{who['data']['name']}** "
+                           f"(`{who['data']['role']}`)")
+            else:
+                st.warning("Authentication is required by this API. "
+                           "Set API_KEY in the UI environment.")
+        else:
+            st.caption("Auth disabled (local mode)")
     except ApiError as exc:
         st.error(str(exc))
 
@@ -175,3 +186,40 @@ if run and question.strip():
     st.caption(f"request_id `{res.get('request_id', '-')}`")
 else:
     st.info("Pick an example above or type your own question, then press **Analyse**.")
+
+# ------------------------------------------------------- audit (admin only)
+stats_resp = cached_get("/audit/stats")
+if stats_resp.get("ok"):
+    st.divider()
+    with st.expander("🔎 Audit log — every question asked, answered or refused"):
+        stats = stats_resp["data"]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Questions", stats.get("total_questions", 0))
+        c2.metric("Refused", stats.get("by_status", {}).get("refused", 0))
+        c3.metric("Refusal rate", f"{stats.get('refusal_rate', 0) * 100:.0f}%")
+
+        by_stage = stats.get("refusals_by_stage") or {}
+        if by_stage:
+            st.caption("Refusals by blocking stage: " +
+                       ", ".join(f"{k} ({v})" for k, v in by_stage.items()))
+
+        ev = cached_get("/audit?limit=50")
+        if ev.get("ok") and ev["data"]["events"]:
+            rows = [
+                {
+                    "when": e["ts"][:19].replace("T", " "),
+                    "who": e["principal"],
+                    "question": e["question"][:60],
+                    "status": e["status"],
+                    "blocked at": e["blocked_stage"] or "-",
+                    "rows": e["row_count"],
+                    "ms": round(e["duration_ms"]),
+                }
+                for e in ev["data"]["events"]
+            ]
+            audit_df = pd.DataFrame(rows)
+            st.dataframe(audit_df, use_container_width=True, hide_index=True)
+            st.download_button("Download audit CSV", audit_df.to_csv(index=False),
+                               file_name="audit.csv", mime="text/csv")
+        else:
+            st.caption("No audit events yet.")

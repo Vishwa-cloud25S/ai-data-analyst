@@ -78,6 +78,43 @@ removed) and refuses anything that shares no term with it:
 `tests/test_scope.py` pins 8 out-of-scope and 10 in-scope questions so the boundary
 cannot drift.
 
+## Access control and audit
+
+Auth is off by default so `make api` just works. Turn it on with two environment
+variables and the API refuses to start if you enable auth without configuring keys:
+
+```bash
+AUTH_ENABLED=true
+API_KEYS="k-director-...:admin:director,k-officer-...:viewer:field_officer"
+```
+
+| Role | Can |
+|---|---|
+| `viewer` | ask questions |
+| `analyst` | + call `/validate-sql` to inspect the guardrail |
+| `admin` | + read `/audit`, `/audit/stats`, `/principals` |
+
+Keys are compared in constant time and held only as SHA-256 digests; no endpoint
+ever returns key material.
+
+**Every question is recorded — answered, refused or errored** — in a SQLite log kept
+separate from the (read-only) warehouse:
+
+```
+14:55:29  field_officer  refused   blocked=intent_detection   rows=0   show me employee salaries
+14:55:29  field_officer  answered  blocked=None               rows=10  What were our highest revenue products...
+```
+
+```json
+{"total_questions": 2, "by_status": {"answered": 1, "refused": 1},
+ "refusals_by_stage": {"intent_detection": 1}, "refusal_rate": 0.5}
+```
+
+The refusals are the point. A log of successes proves nothing; a log showing *what was
+asked, what was denied and which stage denied it* is what an auditor, a data-protection
+officer or a public-sector buyer actually needs. Audit writes can never fail a user
+request — the backend is best-effort by design.
+
 ## Guardrails, concretely
 
 ```python
@@ -133,7 +170,10 @@ curl -X POST localhost:8000/ask -H 'content-type: application/json' -d '{
 | `POST /ask` | The full pipeline. Returns answer, SQL, rows, chart spec, confidence, trace. |
 | `POST /validate-sql` | The guardrail on its own — auditable in isolation. |
 | `GET /semantic-layer` | The published contract: entities, metrics, approved joins. |
-| `GET /health` | Warehouse, active model, entity/metric counts. |
+| `GET /health` | Warehouse, active model, entity/metric counts, auth/audit flags. Public. |
+| `GET /whoami` | The caller's identity and role. |
+| `GET /audit` | Every question asked, with SQL, outcome and blocking stage. Admin. |
+| `GET /audit/stats` | Volumes, refusal rate, refusals by stage, top users. Admin. |
 | `GET /docs` | OpenAPI UI. |
 
 ## The semantic layer
@@ -161,7 +201,7 @@ already write becomes the context the model reasons over.
 ```
 app/
   api/          FastAPI routes + pydantic contracts
-  core/         settings
+  core/         settings · API-key auth & roles · audit log
   db/seed.py    deterministic synthetic warehouse
   llm/          OpenAI wrapper with offline fallback
   pipeline/     intent · retrieval(RAG) · generator · validator ·
@@ -169,15 +209,16 @@ app/
   semantic/     semantic_layer.yml + loader
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          127 tests: guardrails, scope gate, intent, time parsing,
-                retrieval, execution, result checks, pipeline, API, UI
+tests/          157 tests: guardrails, scope gate, auth & roles, audit log,
+                intent, time parsing, retrieval, execution, result checks,
+                pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
 ```
 
 ## Testing
 
 ```bash
-make test        # 127 tests, no network required
+make test        # 157 tests, no network required
 make lint
 ```
 

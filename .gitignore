@@ -16,3 +16,7 @@ dbt/logs/
 .DS_Store
 .idea/
 .vscode/
+data/audit.sqlite
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

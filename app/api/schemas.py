@@ -55,3 +55,21 @@ class HealthResponse(BaseModel):
     llm: str
     entities: int
     metrics: int
+    auth_enabled: bool = False
+    audit_enabled: bool = True
+
+
+class WhoAmIResponse(BaseModel):
+    name: str
+    role: str
+    authenticated: bool
+
+
+class AuditStatsResponse(BaseModel):
+    total_questions: int
+    by_status: dict[str, int] = {}
+    refusals_by_stage: dict[str, int] = {}
+    refusal_rate: float = 0.0
+    top_users: list[dict[str, Any]] = []
+    first_event: str | None = None
+    last_event: str | None = None
