@@ -1,0 +1,169 @@
+# Semantic layer: the ONLY surface the LLM is allowed to reason about.
+# Physical tables not listed here are invisible and unqueryable.
+version: 1
+
+entities:
+  - name: fct_orders
+    description: One row per order line item. Grain = order_line_id. The revenue fact table.
+    physical_table: main.fct_orders
+    primary_key: order_line_id
+    dimensions:
+      - name: order_line_id
+        type: varchar
+        description: Unique id of the order line.
+      - name: order_id
+        type: varchar
+        description: Id of the parent order.
+      - name: order_date
+        type: date
+        description: Date the order was placed. Use this for all time filters.
+      - name: order_status
+        type: varchar
+        description: One of placed, shipped, delivered, returned, cancelled.
+      - name: channel
+        type: varchar
+        description: Sales channel. One of web, mobile, retail, partner.
+      - name: product_id
+        type: varchar
+        description: Foreign key to dim_products.product_id.
+      - name: customer_id
+        type: varchar
+        description: Foreign key to dim_customers.customer_id.
+      - name: region
+        type: varchar
+        description: Region the order shipped to. One of NA, EMEA, APAC, LATAM.
+    measures:
+      - name: quantity
+        type: integer
+        description: Units sold on the line.
+      - name: unit_price
+        type: decimal
+        description: Price per unit in USD at time of sale.
+      - name: discount_amount
+        type: decimal
+        description: Discount applied to the line in USD.
+      - name: net_revenue
+        type: decimal
+        description: quantity * unit_price - discount_amount. Pre-computed net revenue in USD.
+      - name: cost_amount
+        type: decimal
+        description: Total cost of goods for the line in USD.
+
+  - name: dim_products
+    description: Product catalogue. One row per product.
+    physical_table: main.dim_products
+    primary_key: product_id
+    dimensions:
+      - name: product_id
+        type: varchar
+        description: Unique product id.
+      - name: product_name
+        type: varchar
+        description: Human readable product name.
+      - name: category
+        type: varchar
+        description: Product category. One of Audio, Computing, Wearables, Home, Accessories.
+      - name: brand
+        type: varchar
+        description: Brand name.
+      - name: is_active
+        type: boolean
+        description: Whether the product is currently sold.
+    measures:
+      - name: list_price
+        type: decimal
+        description: Current list price in USD.
+
+  - name: dim_customers
+    description: Customer dimension. One row per customer.
+    physical_table: main.dim_customers
+    primary_key: customer_id
+    dimensions:
+      - name: customer_id
+        type: varchar
+        description: Unique customer id.
+      - name: customer_name
+        type: varchar
+        description: Customer display name.
+      - name: segment
+        type: varchar
+        description: Customer segment. One of Consumer, SMB, Enterprise.
+      - name: country
+        type: varchar
+        description: Two letter country code.
+      - name: signup_date
+        type: date
+        description: Date the customer signed up.
+
+joins:
+  - left: fct_orders
+    right: dim_products
+    sql_on: fct_orders.product_id = dim_products.product_id
+    type: left
+  - left: fct_orders
+    right: dim_customers
+    sql_on: fct_orders.customer_id = dim_customers.customer_id
+    type: left
+
+metrics:
+  - name: total_revenue
+    label: Total Revenue
+    description: Net revenue in USD, excluding cancelled and returned orders. The default meaning of "revenue" or "sales".
+    entity: fct_orders
+    expression: SUM(fct_orders.net_revenue)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: currency
+
+  - name: gross_margin
+    label: Gross Margin
+    description: Net revenue minus cost of goods, in USD.
+    entity: fct_orders
+    expression: SUM(fct_orders.net_revenue - fct_orders.cost_amount)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: currency
+
+  - name: units_sold
+    label: Units Sold
+    description: Total number of units sold.
+    entity: fct_orders
+    expression: SUM(fct_orders.quantity)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: number
+
+  - name: order_count
+    label: Orders
+    description: Distinct count of orders.
+    entity: fct_orders
+    expression: COUNT(DISTINCT fct_orders.order_id)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: number
+
+  - name: average_order_value
+    label: Average Order Value
+    description: Net revenue divided by distinct orders, in USD.
+    entity: fct_orders
+    expression: SUM(fct_orders.net_revenue) / NULLIF(COUNT(DISTINCT fct_orders.order_id), 0)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: currency
+
+  - name: return_rate
+    label: Return Rate
+    description: Share of order lines that were returned.
+    entity: fct_orders
+    expression: SUM(CASE WHEN fct_orders.order_status = 'returned' THEN 1 ELSE 0 END) * 1.0 / NULLIF(COUNT(*), 0)
+    filters: []
+    format: percent
+
+  - name: active_customers
+    label: Active Customers
+    description: Distinct customers who purchased.
+    entity: fct_orders
+    expression: COUNT(DISTINCT fct_orders.customer_id)
+    filters:
+      - fct_orders.order_status NOT IN ('cancelled', 'returned')
+    format: number
