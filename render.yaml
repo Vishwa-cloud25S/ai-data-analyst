@@ -1,0 +1,38 @@
+# Render.com blueprint - deploys the API and the UI as two services.
+# Both run on the free tier; the UI reaches the API over Render's private network.
+#
+#   1. Push this repo to GitHub
+#   2. Render dashboard -> New -> Blueprint -> pick the repo
+#   3. Optionally set OPENAI_API_KEY on the api service (it runs fine without)
+services:
+  - type: web
+    name: ai-data-analyst-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: WAREHOUSE
+        value: duckdb
+      - key: DUCKDB_PATH
+        value: /srv/data/warehouse.duckdb
+      - key: MAX_ROWS
+        value: "1000"
+      - key: OPENAI_API_KEY
+        sync: false          # set in the dashboard; absent = deterministic planner
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
+
+  - type: web
+    name: ai-data-analyst-ui
+    runtime: docker
+    dockerfilePath: ./Dockerfile.ui
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: API_URL
+        fromService:
+          type: web
+          name: ai-data-analyst-api
+          property: hostport

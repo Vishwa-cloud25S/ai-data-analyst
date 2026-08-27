@@ -47,7 +47,7 @@ Chart + explanation
 | # | Stage | What it does | What it stops |
 |---|-------|--------------|---------------|
 | 1 | **Intent detection** | Classifies the question (`ranking`, `trend`, `comparison`, `metric_query`, `metadata`, `unsupported`) and extracts metrics, dimensions, grain, time range and `top N`. | Write requests, HR/salary fishing, prompt injection — refused before any SQL exists. |
-| 2 | **Schema retrieval (RAG)** | TF-IDF retrieval over documents built from the semantic layer **and dbt descriptions**, returning only the relevant slice of schema. | Prompt bloat, and the model ever seeing tables outside the contract. |
+| 2 | **Schema retrieval (RAG) + scope gate** | TF-IDF retrieval (stopword-filtered, de-pluralised) over the semantic layer **and dbt descriptions**, returning only the relevant slice of schema. A question sharing no vocabulary with the layer is refused here. | Prompt bloat; the model seeing tables outside the contract; and *confidently wrong answers to unrelated questions* — see below. |
 | 3 | **SQL generation** | LLM writes SQL from the retrieved slice, seeded with a deterministic planner's SQL as a reference. Certified metric expressions are supplied verbatim. | Invented metric maths ("revenue = SUM(unit_price)"), missing `WHERE status <> 'cancelled'`. |
 | 4 | **SQL validation** | `sqlglot` AST checks: single statement, SELECT-only, table allow-list, column allow-list, banned functions, no `SELECT *`, no cross joins, join cap, mandatory `LIMIT`. | DDL/DML, stacked statements, `read_csv_auto('/etc/passwd')`, `information_schema`, hallucinated columns. |
 | 5 | **Read-only execution** | DuckDB opened with `read_only=True`; Postgres runs as a least-privilege role with `default_transaction_read_only` and a statement timeout. | Anything that somehow survived stage 4. |
@@ -56,6 +56,27 @@ Chart + explanation
 
 Every stage is recorded in a `trace` returned with each answer, so the UI shows exactly
 what happened, in what order, and how long it took.
+
+### Refusing beats guessing
+
+An early version answered `"what is the weather in Hyderabad"` with **total revenue**.
+Nothing leaked — the guardrails held — but with no metric keyword matched, intent
+detection quietly fell back to the default metric and reported a real number for an
+unrelated question. A governed system that invents relevance is not governed.
+
+The scope gate now derives a vocabulary from the semantic layer itself (entity names,
+columns, metric labels, synonyms; stopwords and generic terms like `total`/`average`
+removed) and refuses anything that shares no term with it:
+
+```
+"what is the weather in Hyderabad"   -> refused, stage 2, no SQL, no execution
+"how much do we pay our staff"       -> refused, stage 2
+"which categories sell best"         -> answered  (matched: category)
+"top 5 skus by sales"                -> answered  (matched: sku, product, sales)
+```
+
+`tests/test_scope.py` pins 8 out-of-scope and 10 in-scope questions so the boundary
+cannot drift.
 
 ## Guardrails, concretely
 
@@ -148,15 +169,15 @@ app/
   semantic/     semantic_layer.yml + loader
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          78 tests: guardrails, intent, time parsing, retrieval,
-                execution, result checks, pipeline, API
+tests/          127 tests: guardrails, scope gate, intent, time parsing,
+                retrieval, execution, result checks, pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
 ```
 
 ## Testing
 
 ```bash
-make test        # 78 tests, no network required
+make test        # 127 tests, no network required
 make lint
 ```
 
@@ -173,10 +194,34 @@ both that a legitimate question is `answered` and that `drop table fct_orders` i
 - **The planner is a first-class citizen**, not a stub. It gives the LLM a strong reference
   query, gives CI a deterministic path, and gives production a fallback when generated
   SQL fails validation.
-- **Refusals are informative.** A blocked question returns the reason and the trace, not
-  a shrug.
+- **Refusals are informative.** A blocked question returns the reason, the stage that
+  blocked it and the full trace, not a shrug.
 - **Trust boundary is one process.** Streamlit talks HTTP to FastAPI; it holds no
   credentials and no database driver.
+
+## Deploying
+
+**Render** (both services, free tier) - `render.yaml` is a blueprint:
+push the repo, then Render → New → Blueprint → select it. The UI is wired to the
+API over the private network automatically. Set `OPENAI_API_KEY` on the API service
+if you want the LLM path; it runs without one.
+
+**Fly.io** (API) - `fly.toml` is included:
+
+```bash
+fly launch --no-deploy --copy-config
+fly secrets set OPENAI_API_KEY=sk-...   # optional
+fly deploy
+```
+
+**Anywhere with Docker**:
+
+```bash
+docker compose up --build          # API :8000, UI :8501
+```
+
+The container seeds its own DuckDB warehouse on start, so a fresh deploy is
+answering questions within seconds of boot with no external database required.
 
 ## Licence
 

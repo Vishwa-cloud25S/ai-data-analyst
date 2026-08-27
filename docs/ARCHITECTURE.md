@@ -48,6 +48,8 @@ POST /ask {"question": "..."}
   │
   ├─ 1 intent_detection      → refuse here for writes / restricted data / injection
   ├─ 2 schema_retrieval      → RAG: top-k docs from semantic layer + dbt metadata
+  │                            + scope gate: refuse if the question shares no
+  │                              vocabulary with the layer
   ├─ 3 sql_generation        → planner SQL always built; LLM may improve on it
   ├─ 4 sql_validation        → AST checks; on failure retry with planner SQL; else refuse
   ├─ 5 execution             → read-only connection, row cap, timeout
@@ -67,6 +69,8 @@ POST /ask {"question": "..."}
 | Query returns > `MAX_ROWS` | Truncated, flagged in warnings, confidence reduced. |
 | Query returns implausible values | `refused` with the specific sanity check that fired. |
 | Warehouse unreachable | `error` status with a remediation hint, never a stack trace to the client. |
+| Question unrelated to the data | `refused` at stage 2 by the scope gate, rather than answered with the default metric. |
+| UI cannot reach the API | The Streamlit client raises on connection refusal, 4xx/5xx, non-JSON and wrong-shaped `/health` payloads, and names the likely cause. |
 
 ## Validator checks (stage 4)
 
