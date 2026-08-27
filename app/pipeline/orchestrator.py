@@ -138,8 +138,19 @@ class Analyst:
                 issues=["No term in the question maps to the semantic layer."],
             )
 
-        # Dimensions come from the semantic layer, not a hardcoded word list.
-        from app.pipeline.intent import extract_dimensions, metric_vocabulary
+        # Metrics and dimensions both come from the semantic layer, never from
+        # a word list baked into the code.
+        from app.pipeline.intent import (
+            extract_dimensions,
+            metric_vocabulary,
+            resolve_metrics,
+        )
+
+        named_metrics = resolve_metrics(question, sl)
+        if named_metrics:
+            intent.metrics = named_metrics
+        elif not any(m in sl.metrics for m in intent.metrics):
+            intent.metrics = context["metrics"][:1] or intent.metrics
 
         discovered = extract_dimensions(question, sl, skip=metric_vocabulary(sl))
         merged = [d for d in intent.dimensions if sl.resolve_grouping(d)] + [

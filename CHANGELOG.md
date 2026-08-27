@@ -62,6 +62,12 @@ deployment refuses `drop table`.
 **Documentation** — architecture, onboarding, security, pitch, demo script, and a
 case study of the first run against an unfamiliar schema.
 
+**Semantic-layer editor** — admin-only endpoints and a UI panel for editing
+entities, columns and metrics. Changes are validated by loading the layer *and*
+executing every entity and metric against the warehouse before anything is
+written; saves are atomic, backed up, restorable, applied without a restart, and
+audited with a diff flagging newly exposed data.
+
 ### Fixed during development
 
 Bugs worth recording because each came from contact with reality rather than
@@ -74,6 +80,9 @@ planning:
   an unrelated service on the same port.
 - Out-of-scope questions were answered with total revenue instead of refused.
 - Containers bound a hardcoded port, so the first cloud deploy never served.
+- Metric selection was a hardcoded word list, so a metric defined at runtime was
+  unreachable by name and the question silently fell back to revenue - the same
+  failure as the dimension list, one field over. Found by using the new editor.
 - Six schema-specific assumptions found by running against Chinook: keys
   classified as measures on CamelCase columns, lowercased primary keys, colliding
   metric names, a hardcoded `order_date`, single-hop-only joins, and a hardcoded

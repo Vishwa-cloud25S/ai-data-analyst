@@ -115,6 +115,25 @@ asked, what was denied and which stage denied it* is what an auditor, a data-pro
 officer or a public-sector buyer actually needs. Audit writes can never fail a user
 request — the backend is best-effort by design.
 
+## Editing the semantic layer without touching YAML
+
+Metric definitions are business decisions, so the people who own them should not
+need an engineer. Admins get an editor in the UI (and `/semantic-layer/raw`,
+`/semantic-layer/validate`, `/semantic-layer/versions` on the API):
+
+- **Metrics tab** — a form: label, description, expression, mandatory filters, format
+- **Advanced tab** — the raw file, for those who prefer it
+- **History tab** — every save is backed up and restorable
+
+Nothing is saved until it **loads and executes against the warehouse**, so a typo in
+an expression is rejected rather than breaking every future question. Saves take
+effect immediately — no restart — and each one is written to the audit log with a
+diff, flagging any change that *exposes new tables or columns*.
+
+This is the highest-privilege surface in the system: whoever edits the layer decides
+what the assistant can reach. It is admin-only for that reason, and
+[SECURITY.md](SECURITY.md) says so plainly.
+
 ## Guardrails, concretely
 
 ```python
@@ -228,6 +247,8 @@ curl -X POST localhost:8000/ask -H 'content-type: application/json' -d '{
 | `GET /whoami` | The caller's identity and role. |
 | `GET /audit` | Every question asked, with SQL, outcome and blocking stage. Admin. |
 | `GET /audit/stats` | Volumes, refusal rate, refusals by stage, top users. Admin. |
+| `GET/PUT /semantic-layer/raw` | Read and edit the layer. Validated, backed up, audited. Admin. |
+| `POST /semantic-layer/validate` | Dry run against the warehouse; saves nothing. Admin. |
 | `GET /docs` | OpenAPI UI. |
 
 ## The semantic layer
@@ -264,7 +285,7 @@ app/
   semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          214 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          236 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -273,7 +294,7 @@ tests/          214 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 214 tests, no network required
+make test        # 236 tests, no network required
 make lint
 ```
 

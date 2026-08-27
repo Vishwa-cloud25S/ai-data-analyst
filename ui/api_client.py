@@ -104,6 +104,12 @@ class ApiClient:
     def get(self, path: str) -> Any:
         return self._request("GET", path)
 
+    def post_json(self, path: str, payload: dict) -> Any:
+        return self._request("POST", path, json=payload)
+
+    def put_json(self, path: str, payload: dict) -> Any:
+        return self._request("PUT", path, json=payload)
+
     def ask(self, question: str, use_llm: bool) -> dict:
         data = self._request("POST", "/ask",
                              json={"question": question, "use_llm": use_llm})

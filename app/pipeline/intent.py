@@ -160,6 +160,40 @@ def extract_dimensions(question: str, sl, skip: set[str] | None = None) -> list[
     return found
 
 
+def resolve_metrics(question: str, sl) -> list[str]:
+    """Match a question to metrics declared in the layer, by name and label.
+
+    Metric selection used to be a hardcoded word list, so a metric added at
+    runtime - or any metric a customer defines - was unreachable by name and
+    the question silently fell back to the default. Same failure as the
+    hardcoded dimension list, one field over.
+    """
+    from app.pipeline.retrieval import STOPWORDS
+    from app.semantic.bootstrap import _singularise, snake
+
+    q_tokens = {
+        _singularise(t) for t in re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", question.lower())
+        if t not in STOPWORDS
+    }
+    scored: list[tuple[int, str]] = []
+    for name, metric in sl.metrics.items():
+        tokens = {
+            _singularise(t)
+            for t in (snake(name).split("_") + re.findall(r"[a-z]+", metric.label.lower()))
+            if len(t) > 2 and t not in STOPWORDS
+        }
+        overlap = tokens & q_tokens
+        if overlap:
+            # Require most of the metric's own words, so "order" alone does not
+            # select "average order value" over "order count".
+            scored.append((len(overlap) * 10 - len(tokens - overlap), name))
+    if not scored:
+        return []
+    scored.sort(reverse=True)
+    best = scored[0][0]
+    return [name for score, name in scored if score == best]
+
+
 def metric_vocabulary(sl) -> set[str]:
     """Words that name metrics, so they are never treated as groupings."""
     from app.semantic.bootstrap import snake

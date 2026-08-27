@@ -49,6 +49,16 @@ class ValidateResponse(BaseModel):
     checks: dict[str, bool] = {}
 
 
+class LayerValidateRequest(BaseModel):
+    yaml: str = Field(..., min_length=1, max_length=500_000)
+    check_warehouse: bool = Field(True, description="Execute entities and metrics too.")
+
+
+class LayerSaveRequest(BaseModel):
+    yaml: str = Field(..., min_length=1, max_length=500_000)
+    message: str | None = Field(None, max_length=300, description="Why this changed.")
+
+
 class HealthResponse(BaseModel):
     status: str
     warehouse: str

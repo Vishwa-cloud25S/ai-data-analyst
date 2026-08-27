@@ -37,8 +37,11 @@ credible:
   toward individual records if the semantic layer exposes fine enough grain.
   There is no k-anonymity or differential privacy here.
 - **A malicious operator.** Anyone who can change `semantic_layer.yml` or the
-  environment can change what is reachable. Treat that file as production config
-  under change control.
+  environment can change what is reachable — including through the admin editor
+  endpoints. Every such change is validated, backed up and audited with a diff
+  that flags newly exposed tables and columns, so the action is *detectable and
+  reversible*, but an admin is by definition trusted. Grant the admin role
+  sparingly and review `/audit` for `EDIT semantic layer` entries.
 - **Denial of service.** Row caps and timeouts limit single queries; there is no
   rate limiting. Put it behind a gateway that has some.
 - **Secrets in questions.** Questions are stored verbatim in the audit log. That

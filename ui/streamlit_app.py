@@ -15,9 +15,11 @@ import streamlit as st
 try:
     from ui.api_client import ApiClient, ApiError
     from ui.charts import build_figure
+    from ui.layer_editor import render as render_layer_editor
 except ImportError:  # pragma: no cover
     from api_client import ApiClient, ApiError
     from charts import build_figure
+    from layer_editor import render as render_layer_editor
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 API_KEY = os.getenv("API_KEY") or None
@@ -186,6 +188,9 @@ if run and question.strip():
     st.caption(f"request_id `{res.get('request_id', '-')}`")
 else:
     st.info("Pick an example above or type your own question, then press **Analyse**.")
+
+# ------------------------------------------- semantic layer editor (admin only)
+render_layer_editor(client, ApiError)
 
 # ------------------------------------------------------- audit (admin only)
 stats_resp = cached_get("/audit/stats")

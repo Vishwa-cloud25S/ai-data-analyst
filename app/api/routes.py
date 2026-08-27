@@ -10,6 +10,8 @@ from app.api.schemas import (
     AskResponse,
     AuditStatsResponse,
     HealthResponse,
+    LayerSaveRequest,
+    LayerValidateRequest,
     ValidateRequest,
     ValidateResponse,
     WhoAmIResponse,
@@ -156,6 +158,112 @@ def audit_stats(principal: Principal = Depends(require("admin"))) -> AuditStatsR
 def principals(principal: Principal = Depends(require("admin"))) -> dict:
     """Configured identities and roles. Never returns key material."""
     return {"auth_enabled": settings.auth_enabled, "principals": get_keyring().describe()}
+
+
+# --------------------------------------------------------------------------
+# Semantic layer editing. Admin only: whoever can edit the layer can decide
+# what the model is able to reach, so this is the highest-privilege surface
+# in the system. Every change is validated, backed up and audited.
+# --------------------------------------------------------------------------
+@router.get("/semantic-layer/raw", tags=["semantic-layer"])
+def layer_raw(principal: Principal = Depends(require("admin"))) -> dict:
+    from app.semantic import editor
+
+    return {"path": str(editor.layer_path()), "yaml": editor.read_raw()}
+
+
+@router.post("/semantic-layer/validate", tags=["semantic-layer"])
+def layer_validate(
+    req: LayerValidateRequest,
+    principal: Principal = Depends(require("admin")),
+) -> dict:
+    """Dry run: parse, load, and execute every entity and metric."""
+    from app.pipeline.executor import get_executor
+    from app.semantic import editor
+
+    executor = get_executor() if req.check_warehouse else None
+    report = editor.validate_yaml_text(req.yaml, executor=executor)
+    return {**report.dict(), "diff": editor.diff_summary(editor.read_raw(), req.yaml)}
+
+
+@router.put("/semantic-layer/raw", tags=["semantic-layer"])
+def layer_save(
+    req: LayerSaveRequest,
+    request: Request,
+    principal: Principal = Depends(require("admin")),
+) -> dict:
+    from app.pipeline.executor import get_executor
+    from app.semantic import editor
+
+    previous = editor.read_raw()
+    report = editor.validate_yaml_text(req.yaml, executor=get_executor())
+    diff = editor.diff_summary(previous, req.yaml)
+
+    if not report.ok:
+        # Never persist a layer that does not load and execute.
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Semantic layer rejected; nothing was saved.",
+                    **report.dict(), "diff": diff},
+        )
+
+    editor.save(req.yaml, author=principal.name)
+    editor.reload_caches()
+
+    if settings.audit_enabled:
+        exposed = diff["entities_added"] + diff["columns_added"]
+        get_audit_log().record(AuditEvent(
+            request_id="layer-edit",
+            principal=principal.name,
+            role=principal.role,
+            client_ip=_client_ip(request),
+            question=f"EDIT semantic layer: {req.message or '(no message)'}",
+            status="answered",
+            sql=None,
+            tables=diff["entities_added"] + diff["entities_removed"],
+            issues=([f"exposed: {', '.join(exposed)}"] if exposed else []),
+        ))
+    log.warning("semantic layer edited by %s: %s", principal.name, diff)
+    return {"saved": True, "diff": diff, **report.dict()}
+
+
+@router.get("/semantic-layer/versions", tags=["semantic-layer"])
+def layer_versions(principal: Principal = Depends(require("admin"))) -> dict:
+    from app.semantic import editor
+
+    return {"versions": editor.list_versions()}
+
+
+@router.post("/semantic-layer/restore/{version_id}", tags=["semantic-layer"])
+def layer_restore(
+    version_id: str,
+    request: Request,
+    principal: Principal = Depends(require("admin")),
+) -> dict:
+    from app.pipeline.executor import get_executor
+    from app.semantic import editor
+
+    try:
+        text = editor.read_version(version_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"No such version: {version_id}") from None
+
+    report = editor.validate_yaml_text(text, executor=get_executor())
+    if not report.ok:
+        raise HTTPException(status_code=422, detail={
+            "message": "That version no longer validates against the warehouse.",
+            **report.dict()})
+
+    diff = editor.diff_summary(editor.read_raw(), text)
+    editor.save(text, author=f"{principal.name}-restore")
+    editor.reload_caches()
+    if settings.audit_enabled:
+        get_audit_log().record(AuditEvent(
+            request_id="layer-restore", principal=principal.name, role=principal.role,
+            client_ip=_client_ip(request),
+            question=f"RESTORE semantic layer version {version_id}", status="answered",
+        ))
+    return {"restored": version_id, "diff": diff}
 
 
 @router.get("/examples", tags=["meta"])
