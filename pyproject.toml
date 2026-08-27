@@ -1,0 +1,26 @@
+[project]
+name = "ai-data-analyst"
+version = "1.0.0"
+description = "Governed natural-language analytics: LLM plans, the semantic layer decides, the warehouse stays read-only."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["dbt/target", ".venv", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = ["B008", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/db/seed.py"]
