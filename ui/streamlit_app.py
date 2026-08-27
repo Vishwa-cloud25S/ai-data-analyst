@@ -8,9 +8,15 @@ from __future__ import annotations
 import os
 
 import pandas as pd
-import plotly.express as px
 import requests
 import streamlit as st
+
+# streamlit run puts the script's own directory on sys.path, plain imports
+# put the project root there; support both so `make ui` and Docker agree.
+try:
+    from ui.charts import build_figure
+except ImportError:  # pragma: no cover
+    from charts import build_figure
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
@@ -118,21 +124,14 @@ if run and question.strip():
         if rows:
             df = pd.DataFrame(rows, columns=columns)
             chart = res.get("chart", {})
-            x, y, ctype = chart.get("x"), chart.get("y"), chart.get("type", "table")
 
             tab_chart, tab_data = st.tabs(["Chart", f"Data ({len(df)} rows)"])
             with tab_chart:
-                if ctype in ("bar", "line") and x in df.columns and y in df.columns:
-                    plot_df = df.copy()
-                    if x == "period":
-                        plot_df[x] = pd.to_datetime(plot_df[x])
-                    fig = (px.line if ctype == "line" else px.bar)(
-                        plot_df, x=x, y=y, title=chart.get("title", ""),
-                        markers=(ctype == "line"),
-                    )
-                    fig.update_layout(margin={"l": 10, "r": 10, "t": 40, "b": 10}, height=430)
+                fig = build_figure(df, chart)
+                if fig is not None:
                     st.plotly_chart(fig, use_container_width=True)
                 else:
+                    st.caption("No chart for this shape of result - showing the data.")
                     st.dataframe(df, use_container_width=True)
             with tab_data:
                 st.dataframe(df, use_container_width=True)
