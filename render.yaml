@@ -44,10 +44,13 @@ services:
     plan: free
     autoDeploy: true
     envVars:
-      # hostport resolves to "host:port" with no scheme on Render's private
-      # network; the UI client prepends http:// when a scheme is absent.
+      # NOTE: do not use `fromService: property: hostport` here. It resolves to
+      # Render's PRIVATE network address (e.g. ai-data-analyst-api-krvg:10000),
+      # and free instances cannot use private networking - the UI then fails
+      # with "cannot reach the API". Set this to the API service's PUBLIC URL
+      # in the dashboard after the first deploy:
+      #     https://<your-api-service>.onrender.com
+      # Render appends a suffix when the service name is already taken, so the
+      # exact hostname is only known once the service exists.
       - key: API_URL
-        fromService:
-          type: web
-          name: ai-data-analyst-api
-          property: hostport
+        sync: false

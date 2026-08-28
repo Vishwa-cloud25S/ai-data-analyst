@@ -55,6 +55,22 @@ If the customer runs **dbt**, use `--dbt target/manifest.json`: their analytics
 engineers have already written these descriptions, and they get pulled in
 automatically.
 
+## Deploying the UI
+
+The UI reaches the API over plain HTTP, so `API_URL` must be an address the UI
+container can actually resolve:
+
+| Deployment | `API_URL` |
+|---|---|
+| Local | `http://localhost:8000` |
+| Docker compose | `http://api:8000` (compose network) |
+| Render / most PaaS free tiers | the API's **public** URL, `https://<service>.onrender.com` |
+| Paid tiers with private networking | the internal address, if your host supports it |
+
+A private-network hostname such as `ai-data-analyst-api-krvg:10000` will not
+resolve where private networking is unavailable, and the UI will report the API
+as unreachable while the API itself is perfectly healthy.
+
 ## Production checklist
 
 | | Why |

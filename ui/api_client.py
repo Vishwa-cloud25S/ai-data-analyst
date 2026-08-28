@@ -51,9 +51,16 @@ class ApiClient:
             resp = requests.request(method, url, timeout=self.timeout,
                                     headers=headers, **kwargs)
         except requests.exceptions.ConnectionError as exc:
+            hint = (
+                "Locally: start it with  uvicorn app.main:app --port 8000"
+                if any(h in self.base_url for h in ("localhost", "127.0.0.1"))
+                else "If this is a deployment, API_URL is probably wrong. It must be "
+                     "the API's reachable URL, e.g. https://<service>.onrender.com - "
+                     "a private-network address like host:10000 will not resolve on "
+                     "hosts that do not support private networking (Render free tier)."
+            )
             raise ApiError(
-                f"Cannot reach the API at {self.base_url}. Is it running?\n\n"
-                f"Start it with:  uvicorn app.main:app --port 8000"
+                f"Cannot reach the API at {self.base_url}. Is it running?\n\n{hint}"
             ) from exc
         except requests.exceptions.Timeout as exc:
             raise ApiError(f"The API at {url} timed out after {self.timeout}s.") from exc
