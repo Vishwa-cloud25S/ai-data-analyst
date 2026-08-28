@@ -20,6 +20,8 @@ after validation.
 | Answering a question it should not | Scope gate refuses questions whose vocabulary does not match the semantic layer, rather than defaulting to a metric. |
 | Silently wrong results | Result validation: null share, negative values, fan-out magnitude, duplicate group keys; low confidence surfaces to the caller. |
 | Unauthorised API access | API keys, three roles, constant-time comparison, SHA-256 digests at rest. |
+| An unauthenticated deployment leaking admin surfaces | With `AUTH_ENABLED=false` callers get `ANONYMOUS_ROLE` (**analyst** by default, not admin), so `/audit`, `/principals` and the semantic-layer editor are closed. Mutating the layer additionally requires an authenticated key regardless of role. |
+| Abuse and cost of a public endpoint | Per-IP sliding-window rate limit on `/ask`, `/validate-sql` and `/semantic-layer` (`RATE_LIMIT_PER_MINUTE`, default 60). `/health` is exempt so platform checks cannot be throttled into a false outage. |
 | Repudiation ("who ran that?") | Append-only audit log of every question, answered or refused, with identity and blocking stage. |
 | Prompt content leaving the estate | `LLM_BASE_URL` routes to a self-hosted model and overrides `OPENAI_API_KEY`; with neither set, no model is called at all. |
 
@@ -42,8 +44,10 @@ credible:
   that flags newly exposed tables and columns, so the action is *detectable and
   reversible*, but an admin is by definition trusted. Grant the admin role
   sparingly and review `/audit` for `EDIT semantic layer` entries.
-- **Denial of service.** Row caps and timeouts limit single queries; there is no
-  rate limiting. Put it behind a gateway that has some.
+- **Distributed denial of service.** There is a per-IP rate limit, but it is
+  in-process: the limit is per worker, not per cluster, and it trusts
+  `X-Forwarded-For`. It stops casual abuse of a single public instance. For
+  anything serious, put a real limiter in the gateway.
 - **Secrets in questions.** Questions are stored verbatim in the audit log. That
   is the point, but it means the audit database inherits the sensitivity of what
   people type.

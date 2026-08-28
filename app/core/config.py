@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     # "key1:admin:alice,key2:analyst:bob,key3:viewer:dashboard"
     auth_enabled: bool = False
     api_keys: str = ""
+    # Role given to callers when AUTH_ENABLED is false. Deliberately NOT admin:
+    # "auth is off" must not mean "the internet may read the audit log and edit
+    # the semantic layer". Set ANONYMOUS_ROLE=admin locally if you want the
+    # audit panel without configuring keys.
+    anonymous_role: Literal["viewer", "analyst", "admin"] = "analyst"
+    # Requests per minute per client IP for /ask. 0 disables the limiter.
+    rate_limit_per_minute: int = 60
 
     # --- audit ---
     audit_enabled: bool = True

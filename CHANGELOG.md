@@ -4,6 +4,22 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is
 [semantic](https://semver.org/).
 
+## [1.1.1] — 2026-08-27
+
+### Security
+
+**Anonymous callers were admin when auth was disabled.** The live public
+deployment served `/audit` (every question anyone had asked), `/principals` and
+the semantic-layer editor to anyone who found the URL — meaning a stranger could
+publish a table to the layer and make it queryable. `ANONYMOUS_ROLE` now defaults
+to `analyst`, and mutating the semantic layer requires an authenticated key
+regardless of role. Startup logs a warning when auth is off.
+
+**Added per-IP rate limiting** on `/ask`, `/validate-sql` and `/semantic-layer`
+(`RATE_LIMIT_PER_MINUTE`, default 60). `/health` is exempt so platform health
+checks cannot be throttled into a false outage. In-process and therefore per
+worker — documented as such rather than overclaimed.
+
 ## [1.1.0] — 2026-08-27
 
 ### Added

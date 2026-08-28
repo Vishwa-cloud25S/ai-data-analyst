@@ -97,6 +97,15 @@ API_KEYS="k-director-...:admin:director,k-officer-...:viewer:field_officer"
 Keys are compared in constant time and held only as SHA-256 digests; no endpoint
 ever returns key material.
 
+**With auth off, callers are anonymous with the `analyst` role — not admin.** An
+open deployment therefore still answers questions and exposes the guardrail for
+inspection, while `/audit`, `/principals` and the semantic-layer editor stay
+closed. Editing the layer additionally requires an authenticated key whatever
+`ANONYMOUS_ROLE` says, because that endpoint decides what the assistant can reach.
+
+`/ask`, `/validate-sql` and `/semantic-layer` are rate limited per IP
+(`RATE_LIMIT_PER_MINUTE`, default 60); `/health` is exempt.
+
 **Every question is recorded — answered, refused or errored** — in a SQLite log kept
 separate from the (read-only) warehouse:
 
@@ -285,7 +294,7 @@ app/
   semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          236 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          253 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -294,7 +303,7 @@ tests/          236 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 236 tests, no network required
+make test        # 253 tests, no network required
 make lint
 ```
 

@@ -23,6 +23,15 @@ services:
         value: /srv/data/warehouse.duckdb
       - key: MAX_ROWS
         value: "1000"
+      # Public demo posture: anonymous callers may ask questions and inspect the
+      # validator, but not read the audit log or edit the semantic layer.
+      - key: ANONYMOUS_ROLE
+        value: analyst
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "30"
+      # Set AUTH_ENABLED=true and API_KEYS in the dashboard for a real deployment.
+      - key: AUTH_ENABLED
+        value: "false"
       - key: OPENAI_API_KEY
         sync: false          # set in the dashboard; absent = deterministic planner
       - key: OPENAI_MODEL

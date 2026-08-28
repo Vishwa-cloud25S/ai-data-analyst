@@ -18,7 +18,12 @@ from app.api.schemas import (
 )
 from app.core.audit import AuditEvent, get_audit_log
 from app.core.config import settings
-from app.core.security import Principal, get_keyring, require
+from app.core.security import (
+    Principal,
+    get_keyring,
+    require,
+    require_authenticated,
+)
 from app.llm.client import get_llm
 from app.pipeline.orchestrator import Analyst, get_analyst, semantic_layer_summary
 from app.pipeline.retrieval import get_retriever
@@ -190,7 +195,7 @@ def layer_validate(
 def layer_save(
     req: LayerSaveRequest,
     request: Request,
-    principal: Principal = Depends(require("admin")),
+    principal: Principal = Depends(require_authenticated("admin")),
 ) -> dict:
     from app.pipeline.executor import get_executor
     from app.semantic import editor
@@ -238,7 +243,7 @@ def layer_versions(principal: Principal = Depends(require("admin"))) -> dict:
 def layer_restore(
     version_id: str,
     request: Request,
-    principal: Principal = Depends(require("admin")),
+    principal: Principal = Depends(require_authenticated("admin")),
 ) -> dict:
     from app.pipeline.executor import get_executor
     from app.semantic import editor

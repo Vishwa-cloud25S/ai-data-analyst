@@ -27,6 +27,7 @@ def audited_client(warehouse, retriever, tmp_path, monkeypatch):
 
     monkeypatch.setattr(settings, "audit_enabled", True)
     monkeypatch.setattr(settings, "auth_enabled", False)
+    monkeypatch.setattr(settings, "anonymous_role", "admin")
     log = AuditLog(str(tmp_path / "api-audit.sqlite"))
     set_audit_log(log)
     orch._analyst = Analyst(executor=DuckDBExecutor(path=warehouse),

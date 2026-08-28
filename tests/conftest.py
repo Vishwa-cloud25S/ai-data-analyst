@@ -89,6 +89,7 @@ def client(warehouse, retriever, tmp_path, monkeypatch):
     from app.pipeline.orchestrator import Analyst
 
     monkeypatch.setattr(settings, "auth_enabled", False)
+    monkeypatch.setattr(settings, "anonymous_role", "admin")
     set_audit_log(AuditLog(str(tmp_path / "audit.sqlite")))
     orch._analyst = Analyst(
         executor=DuckDBExecutor(path=warehouse), retriever=retriever, use_llm=False

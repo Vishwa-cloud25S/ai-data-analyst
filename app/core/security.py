@@ -127,9 +127,15 @@ def current_principal(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> Principal:
-    """Resolve the caller. When auth is disabled, everyone is an anonymous admin."""
+    """Resolve the caller.
+
+    With auth disabled the caller is anonymous with `ANONYMOUS_ROLE` (analyst by
+    default). It is deliberately not admin: an unauthenticated deployment must
+    not expose the audit log or the semantic-layer editor to whoever finds the
+    URL.
+    """
     if not settings.auth_enabled:
-        return Principal(name=ANONYMOUS, role="admin")
+        return Principal(name=ANONYMOUS, role=settings.anonymous_role)
 
     if not x_api_key:
         raise HTTPException(
@@ -146,6 +152,34 @@ def current_principal(
             headers={"WWW-Authenticate": "ApiKey"},
         )
     return principal
+
+
+def require_authenticated(role: str):
+    """Like `require`, but never satisfied by an anonymous caller.
+
+    For endpoints that change what the system can reach. Even an operator who
+    sets ANONYMOUS_ROLE=admin for local convenience should not be able to
+    mutate the semantic layer without presenting a key.
+    """
+
+    def _dep(principal: Principal = Depends(current_principal)) -> Principal:
+        if not principal.authenticated:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This endpoint changes what the assistant can access and "
+                       "requires an authenticated admin key. Set AUTH_ENABLED=true "
+                       "and API_KEYS, then send X-API-Key.",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+        if not principal.can(role):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This endpoint requires the '{role}' role; "
+                       f"'{principal.name}' has '{principal.role}'.",
+            )
+        return principal
+
+    return _dep
 
 
 def require(role: str):

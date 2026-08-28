@@ -153,3 +153,73 @@ def test_auth_disabled_keeps_local_dev_open(client):
     assert client.get("/health").json()["auth_enabled"] is False
     assert client.post("/ask", json={"question": "revenue by region",
                                      "use_llm": False}).status_code == 200
+
+
+# ---------------------------------------------------------------- secure defaults
+def test_anonymous_is_not_admin_by_default():
+    """Regression: 'auth disabled' once meant 'the internet is an admin'.
+
+    The live deployment served /audit, /principals and the semantic-layer
+    editor to anyone who found the URL.
+    """
+    from app.core.config import Settings
+
+    assert Settings().anonymous_role == "analyst"
+
+
+@pytest.fixture
+def open_client(warehouse, retriever, tmp_path, monkeypatch):
+    """Auth disabled, defaults untouched - i.e. the public-demo posture."""
+    import app.core.security as security
+    import app.pipeline.orchestrator as orch
+    from app.core.audit import AuditLog, set_audit_log
+    from app.core.config import settings
+    from app.main import app as fastapi_app
+    from app.pipeline.executor import DuckDBExecutor
+    from app.pipeline.orchestrator import Analyst
+
+    monkeypatch.setattr(settings, "auth_enabled", False)
+    monkeypatch.setattr(settings, "anonymous_role", "analyst")  # the default
+    security.reset_keyring()
+    set_audit_log(AuditLog(str(tmp_path / "a.sqlite")))
+    orch._analyst = Analyst(executor=DuckDBExecutor(path=warehouse),
+                            retriever=retriever, use_llm=False)
+    with TestClient(fastapi_app) as c:
+        yield c
+    set_audit_log(None)
+
+
+def test_open_deployment_still_answers_questions(open_client):
+    r = open_client.post("/ask", json={"question": "revenue by region",
+                                       "use_llm": False})
+    assert r.status_code == 200 and r.json()["status"] == "answered"
+
+
+@pytest.mark.parametrize("path", ["/audit", "/audit/stats", "/principals",
+                                  "/semantic-layer/raw"])
+def test_open_deployment_hides_admin_surfaces(open_client, path):
+    """What a public URL must never hand out to a stranger."""
+    assert open_client.get(path).status_code == 403
+
+
+def test_anonymous_cannot_edit_the_layer_even_as_admin(warehouse, retriever,
+                                                       tmp_path, monkeypatch):
+    """Belt and braces: mutations need a key, whatever ANONYMOUS_ROLE says."""
+    import app.core.security as security
+    import app.pipeline.orchestrator as orch
+    from app.core.config import settings
+    from app.main import app as fastapi_app
+    from app.pipeline.executor import DuckDBExecutor
+    from app.pipeline.orchestrator import Analyst
+
+    monkeypatch.setattr(settings, "auth_enabled", False)
+    monkeypatch.setattr(settings, "anonymous_role", "admin")
+    security.reset_keyring()
+    orch._analyst = Analyst(executor=DuckDBExecutor(path=warehouse),
+                            retriever=retriever, use_llm=False)
+    with TestClient(fastapi_app) as c:
+        assert c.get("/audit").status_code == 200          # reading is allowed
+        r = c.put("/semantic-layer/raw", json={"yaml": "entities: []"})
+        assert r.status_code == 401                        # mutating is not
+        assert "authenticated admin key" in r.json()["detail"]
+        assert c.post("/semantic-layer/restore/x.yml").status_code == 401
