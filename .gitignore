@@ -22,3 +22,8 @@ data/audit.sqlite
 *.sqlite-shm
 semantic_layer.draft.yml
 semantic_layer.yml
+
+# Runtime backups written by the semantic-layer editor. These are operational
+# state (and may describe a customer's schema) - not source.
+app/semantic/semantic_layer_backups/
+semantic_layer_backups/
