@@ -2,6 +2,10 @@
 
 Talks to the FastAPI service over HTTP only - it has no database access and no
 LLM key of its own, which keeps the trust boundary in one place.
+
+Presentation principle: the reader wants the answer, then the evidence. So the
+headline numbers come first, the chart second, and the SQL and pipeline trace
+are one click away rather than hidden - they are the reason to trust the number.
 """
 from __future__ import annotations
 
@@ -14,11 +18,11 @@ import streamlit as st
 # put the project root there; support both so `make ui` and Docker agree.
 try:
     from ui.api_client import ApiClient, ApiError
-    from ui.charts import build_figure
+    from ui.charts import build_figure, headline_stats
     from ui.layer_editor import render as render_layer_editor
 except ImportError:  # pragma: no cover
     from api_client import ApiClient, ApiError
-    from charts import build_figure
+    from charts import build_figure, headline_stats
     from layer_editor import render as render_layer_editor
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
@@ -27,51 +31,63 @@ API_KEY = os.getenv("API_KEY") or None
 st.set_page_config(page_title="AI Data Analyst", page_icon="📊", layout="wide",
                    initial_sidebar_state="expanded")
 
-# Streamlit's defaults read as "prototype". A buyer judges the screen in front
-# of them, so this tightens typography, spacing and the result surfaces without
-# turning the tool into a brochure - numbers stay the loudest thing on screen.
 st.markdown("""
 <style>
-  :root { --ink:#0f1720; --mute:#6b7a8c; --line:#e3e8ee; --accent:#0b64d0;
+  :root { --ink:#0f1720; --mute:#6b7a8c; --line:#e6ebf1; --accent:#0b64d0;
           --good:#0a7c53; --warn:#b3261e; --soft:#f5f7fa; }
-  .block-container { padding-top: 3rem; padding-bottom: 3rem; max-width: 1180px; }
-  h1, h2, h3 { letter-spacing: -0.02em; color: var(--ink); }
-  #MainMenu, footer { visibility: hidden; }
+  .block-container { padding-top: 2.6rem; padding-bottom: 4rem; max-width: 1180px; }
+  h1,h2,h3 { letter-spacing:-.02em; color:var(--ink); }
+  #MainMenu, footer, [data-testid="stDecoration"] { visibility:hidden; }
 
-  /* hero */
-  .ada-hero { border-bottom: 1px solid var(--line); padding-bottom: 1.1rem;
-              margin-bottom: 1.4rem; }
-  .ada-eyebrow { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-                 font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
-                 color: var(--accent); margin-bottom: .35rem; }
-  .ada-title { font-size: 2.1rem; font-weight: 750; line-height: 1.12;
-               letter-spacing: -.03em; color: var(--ink); margin: 0 0 .35rem; }
-  .ada-sub { color: var(--mute); font-size: .96rem; margin: 0; }
+  .ada-hero { border-bottom:1px solid var(--line); padding-bottom:1rem; margin-bottom:1.5rem; }
+  .ada-eyebrow { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.7rem;
+                 letter-spacing:.16em; text-transform:uppercase; color:var(--accent);
+                 margin-bottom:.4rem; }
+  .ada-title { font-size:2.05rem; font-weight:750; line-height:1.12; letter-spacing:-.03em;
+               color:var(--ink); margin:0 0 .3rem; }
+  .ada-sub { color:var(--mute); font-size:.95rem; margin:0; }
 
-  /* answer surface */
-  .ada-answer { background: linear-gradient(180deg,#f7fbff,#f2f7fd);
-                border: 1px solid #d6e6f8; border-left: 4px solid var(--accent);
-                border-radius: 10px; padding: 1.05rem 1.2rem; font-size: 1.06rem;
-                line-height: 1.6; color: var(--ink); }
-  .ada-refused { background: #fff7f6; border: 1px solid #f3d3cf;
-                 border-left: 4px solid var(--warn); border-radius: 10px;
-                 padding: 1.05rem 1.2rem; color: #7d2018; font-size: 1rem; }
+  .ada-answer { background:linear-gradient(180deg,#f8fbff,#f2f7fd); border:1px solid #d9e8f9;
+                border-left:4px solid var(--accent); border-radius:10px; padding:1.1rem 1.25rem;
+                font-size:1.08rem; line-height:1.62; color:var(--ink); }
+  .ada-refused { background:#fff8f7; border:1px solid #f4d6d2; border-left:4px solid var(--warn);
+                 border-radius:10px; padding:1.1rem 1.25rem; color:#7d2018; font-size:1rem;
+                 line-height:1.6; }
 
-  /* sidebar */
-  section[data-testid="stSidebar"] { background: var(--soft);
-                                     border-right: 1px solid var(--line); }
-  section[data-testid="stSidebar"] .block-container { padding-top: 1.4rem; }
+  .ada-kpis { display:flex; gap:14px; flex-wrap:wrap; margin:1rem 0 .4rem; }
+  .ada-kpi { flex:1; min-width:170px; border:1px solid var(--line); border-radius:10px;
+             padding:.8rem .95rem; background:#fff; }
+  .ada-kpi .k-label { font-size:.72rem; letter-spacing:.09em; text-transform:uppercase;
+                      color:var(--mute); font-family:ui-monospace,Menlo,monospace; }
+  .ada-kpi .k-value { font-size:1.42rem; font-weight:700; color:var(--ink);
+                      letter-spacing:-.02em; line-height:1.25; margin-top:.15rem;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ada-kpi .k-delta { font-size:.8rem; color:var(--mute); margin-top:.1rem; }
 
-  /* controls */
-  .stButton > button { border-radius: 8px; font-weight: 550; border: 1px solid var(--line);
-                       transition: all .14s ease; }
-  .stButton > button:hover { border-color: var(--accent); color: var(--accent);
-                             transform: translateY(-1px); }
-  .stButton > button[kind="primary"] { background: var(--accent); border-color: var(--accent); }
-  .stTextInput input { border-radius: 8px; font-size: 1rem; padding: .65rem .8rem; }
-  .stTabs [data-baseweb="tab"] { font-weight: 560; }
-  div[data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 9px; }
-  code { font-size: .84em; }
+  .ada-chip { display:inline-block; font-size:.74rem; font-weight:600; padding:2px 9px;
+              border-radius:20px; margin-left:.4rem; vertical-align:middle; }
+  .chip-high { background:#e7f5ee; color:var(--good); }
+  .chip-mid  { background:#fdf3e2; color:#8a5a06; }
+  .chip-low  { background:#fdeceb; color:var(--warn); }
+
+  section[data-testid="stSidebar"] { background:var(--soft); border-right:1px solid var(--line); }
+  section[data-testid="stSidebar"] .block-container { padding-top:1.3rem; }
+  .ada-status { display:flex; align-items:center; gap:.5rem; font-weight:600;
+                color:var(--good); font-size:.92rem; }
+  .ada-dot { width:8px; height:8px; border-radius:50%; background:var(--good); }
+  .ada-dot.bad { background:var(--warn); }
+  .ada-facts { font-size:.87rem; color:var(--mute); line-height:1.75; margin-top:.5rem; }
+  .ada-facts b { color:var(--ink); }
+
+  .stButton > button { border-radius:8px; font-weight:550; border:1px solid var(--line);
+                       transition:all .14s ease; }
+  .stButton > button:hover { border-color:var(--accent); color:var(--accent);
+                             transform:translateY(-1px); }
+  .stButton > button[kind="primary"] { background:var(--accent); border-color:var(--accent); }
+  .stTextInput input { border-radius:8px; font-size:1rem; padding:.68rem .85rem; }
+  .stTabs [data-baseweb="tab"] { font-weight:560; }
+  div[data-testid="stExpander"] { border:1px solid var(--line); border-radius:9px; }
+  code { font-size:.84em; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -87,7 +103,6 @@ STAGE_LABELS = {
 }
 STATUS_ICON = {"ok": "✅", "blocked": "🛑", "error": "❌", "skipped": "⏭️"}
 
-
 client = ApiClient(API_URL, api_key=API_KEY)
 
 
@@ -102,7 +117,7 @@ def cached_get(path: str) -> dict:
 
 # ----------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.title("📊 AI Data Analyst")
+    st.markdown("### 📊 AI Data Analyst")
     st.caption("Natural language → governed SQL → chart + explanation")
 
     api_ok = False
@@ -110,40 +125,30 @@ with st.sidebar:
     try:
         health = client.health()
         api_ok = True
-        st.success("API healthy")
-        llm_name = health["llm"]
+        st.markdown('<div class="ada-status"><span class="ada-dot"></span>'
+                    'Connected</div>', unsafe_allow_html=True)
         st.markdown(
-            f"**Warehouse** `{health['warehouse']}`  \n"
-            f"**Model** `{llm_name}`  \n"
-            f"{health['entities']} entities · {health['metrics']} certified metrics"
+            f'<div class="ada-facts">'
+            f'Warehouse <b>{health["warehouse"]}</b><br>'
+            f'Model <b>{health["llm"]}</b><br>'
+            f'<b>{health["entities"]}</b> entities · '
+            f'<b>{health["metrics"]}</b> certified metrics</div>',
+            unsafe_allow_html=True,
         )
-        # Show the endpoint actually in use. After a fallback the configured
-        # value is not the one serving traffic, and displaying the stale one
-        # sends people to debug a URL the app already stopped using.
-        effective = client.base_url
-        if effective.rstrip("/") != (API_URL or "").rstrip("/"):
-            st.caption(f"API: `{effective}`")
-            st.info(f"`API_URL` is set to `{API_URL}`, which is unreachable. "
-                    f"Fell back to the public endpoint. Set `API_URL` to "
-                    f"`{effective}` to remove the guesswork.", icon="⚠️")
-        else:
-            st.caption(f"API: `{effective}`")
-
         if health.get("auth_enabled"):
             who = cached_get("/whoami")
             if who.get("ok"):
                 st.caption(f"Signed in as **{who['data']['name']}** "
                            f"(`{who['data']['role']}`)")
-            else:
-                st.warning("Authentication is required by this API. "
-                           "Set API_KEY in the UI environment.")
         else:
-            st.caption(f"Auth disabled — callers are anonymous "
-                       f"(`{health.get('anonymous_role', 'analyst')}` role)")
+            st.caption(f"No sign-in required · anonymous "
+                       f"`{health.get('anonymous_role', 'analyst')}`")
     except ApiError as exc:
-        st.caption(f"API: `{API_URL}`")
+        st.markdown('<div class="ada-status"><span class="ada-dot bad"></span>'
+                    'Not connected</div>', unsafe_allow_html=True)
         st.error(str(exc))
 
+    st.divider()
     llm_configured = api_ok and health.get("llm") != "offline-rules"
     if llm_configured:
         use_llm = st.toggle("Use LLM", value=True,
@@ -151,27 +156,36 @@ with st.sidebar:
     else:
         use_llm = False
         st.toggle("Use LLM", value=False, disabled=True,
-                  help="No OPENAI_API_KEY configured on the API, so the "
-                       "deterministic planner handles every question. Set the key "
-                       "and restart the API to enable the LLM path.")
-        st.caption("Running keyless on the deterministic planner.")
+                  help="No OPENAI_API_KEY configured on the API, so the deterministic "
+                       "planner handles every question. Set the key and restart the "
+                       "API to enable the LLM path.")
+        st.caption("Keyless · deterministic planner")
 
-    st.divider()
-    st.subheader("Guardrails")
-    st.markdown(
-        "- LLM sees **only** the semantic layer, never the database\n"
-        "- Generated SQL is parsed and checked against an allow-list\n"
-        "- Execution is on a **read-only** connection with row + time limits\n"
-        "- Results are sanity-checked before they are narrated"
-    )
+    with st.expander("How answers are kept honest"):
+        st.markdown(
+            "- The model sees **only** the semantic layer, never the database\n"
+            "- Generated SQL is parsed and checked against an allow-list\n"
+            "- Execution is **read-only**, with row and time limits\n"
+            "- Results are sanity-checked before they are narrated\n"
+            "- Out-of-scope questions are **refused**, not guessed"
+        )
 
     sem_resp = cached_get("/semantic-layer") if api_ok else {"ok": False}
     if sem_resp.get("ok") and sem_resp["data"].get("metrics"):
-        sem = sem_resp["data"]
         with st.expander("Certified metrics"):
-            for m in sem["metrics"]:
+            for m in sem_resp["data"]["metrics"]:
                 st.markdown(f"**{m['label']}** — {m['description']}")
                 st.code(m["expression"], language="sql")
+
+    # Operator detail, deliberately last and quiet: useful when something is
+    # misconfigured, noise for everyone else.
+    if api_ok:
+        effective = client.base_url
+        with st.expander("Connection"):
+            st.caption(f"In use: `{effective}`")
+            if effective.rstrip("/") != (API_URL or "").rstrip("/"):
+                st.caption(f"⚠️ `API_URL` is `{API_URL}`, which is unreachable. "
+                           f"Set it to `{effective}` to remove the fallback.")
 
 # ----------------------------------------------------------------- main
 st.markdown(
@@ -196,11 +210,11 @@ if "question" not in st.session_state:
 
 cols = st.columns(min(3, max(1, len(examples[:3]))))
 for i, ex in enumerate(examples[:3]):
-    if cols[i].button(ex, use_container_width=True):
+    if cols[i].button(ex, use_container_width=True, key=f"ex{i}"):
         st.session_state.question = ex
 
-question = st.text_input("Question", key="question",
-                         placeholder="What were our highest revenue products last quarter?")
+question = st.text_input("Question", key="question", label_visibility="collapsed",
+                         placeholder="e.g. what were our highest revenue products last quarter?")
 run = st.button("Analyse", type="primary")
 
 if run and question.strip():
@@ -212,6 +226,8 @@ if run and question.strip():
             st.stop()
 
     status = res.get("status")
+    conf = res.get("confidence", 0)
+
     if status == "refused":
         st.markdown(f'<div class="ada-refused"><b>Refused.</b> '
                     f'{res.get("answer", "")}</div>', unsafe_allow_html=True)
@@ -220,46 +236,71 @@ if run and question.strip():
     elif status == "error":
         st.error(res.get("answer"))
     else:
-        st.markdown(f'<div class="ada-answer">{res.get("answer") or "(no answer)"}</div>',
-                    unsafe_allow_html=True)
-        conf = res.get("confidence", 0)
-        st.progress(min(max(conf, 0.0), 1.0), text=f"Confidence {conf:.0%}")
+        chip = ("chip-high" if conf >= 0.8 else "chip-mid" if conf >= 0.5 else "chip-low")
+        st.markdown(
+            f'<div class="ada-answer">{res.get("answer") or "(no answer)"}'
+            f'<span class="ada-chip {chip}">{conf:.0%} confidence</span></div>',
+            unsafe_allow_html=True,
+        )
 
         rows, columns = res.get("rows", []), res.get("columns", [])
+        chart = res.get("chart", {})
         if rows:
             df = pd.DataFrame(rows, columns=columns)
-            chart = res.get("chart", {})
 
-            tab_chart, tab_data = st.tabs(["Chart", f"Data ({len(df)} rows)"])
-            with tab_chart:
+            stats = headline_stats(df, chart)
+            if stats:
+                st.markdown(
+                    '<div class="ada-kpis">' + "".join(
+                        f'<div class="ada-kpi"><div class="k-label">{s["label"]}</div>'
+                        f'<div class="k-value">{s["value"]}</div>'
+                        f'<div class="k-delta">{s["delta"]}</div></div>'
+                        for s in stats
+                    ) + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+            t_chart, t_data, t_sql, t_trace = st.tabs(
+                ["Chart", f"Data ({len(df)})", "SQL", "How it got here"]
+            )
+            with t_chart:
                 fig = build_figure(df, chart)
                 if fig is not None:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True,
+                                    config={"displayModeBar": False})
                 else:
-                    st.caption("No chart for this shape of result - showing the data.")
-                    st.dataframe(df, use_container_width=True)
-            with tab_data:
-                st.dataframe(df, use_container_width=True)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+            with t_data:
+                st.dataframe(df, use_container_width=True, hide_index=True)
                 st.download_button("Download CSV", df.to_csv(index=False),
                                    file_name="result.csv", mime="text/csv")
+            with t_sql:
+                st.caption("Validated against the semantic layer before execution, "
+                           "then run on a read-only connection.")
+                st.code(res.get("sql") or "", language="sql")
+            with t_trace:
+                for stage in res.get("trace", []):
+                    icon = STATUS_ICON.get(stage["status"], "•")
+                    label = STAGE_LABELS.get(stage["name"], stage["name"])
+                    st.markdown(f"{icon} **{label}** · {stage['duration_ms']} ms")
+                    st.json(stage.get("detail", {}), expanded=False)
+        elif res.get("sql"):
+            with st.expander("Generated SQL"):
+                st.code(res["sql"], language="sql")
 
-    if res.get("sql"):
-        with st.expander("Generated SQL (validated before execution)", expanded=False):
-            st.code(res["sql"], language="sql")
+    if status != "answered" and res.get("trace"):
+        with st.expander("How it got here", expanded=True):
+            for stage in res.get("trace", []):
+                icon = STATUS_ICON.get(stage["status"], "•")
+                label = STAGE_LABELS.get(stage["name"], stage["name"])
+                st.markdown(f"{icon} **{label}** · {stage['duration_ms']} ms")
+                st.json(stage.get("detail", {}), expanded=False)
 
     for w in res.get("warnings", []):
         st.caption(f"⚠️ {w}")
-
-    with st.expander("Pipeline trace", expanded=(status != "answered")):
-        for stage in res.get("trace", []):
-            icon = STATUS_ICON.get(stage["status"], "•")
-            label = STAGE_LABELS.get(stage["name"], stage["name"])
-            st.markdown(f"{icon} **{label}** · {stage['duration_ms']} ms")
-            st.json(stage.get("detail", {}), expanded=False)
-
     st.caption(f"request_id `{res.get('request_id', '-')}`")
 else:
-    st.info("Pick an example above or type your own question, then press **Analyse**.")
+    st.caption("Pick an example above or type your own question, then press **Analyse**.")
 
 # ------------------------------------------- semantic layer editor (admin only)
 render_layer_editor(client, ApiError)

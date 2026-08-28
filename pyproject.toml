@@ -24,6 +24,9 @@ ignore = ["B008", "E501", "UP038"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
+# dict(...) is plotly's own idiom for nested style objects; literals here would
+# be noisier than the thing the rule is protecting against.
+"ui/charts.py" = ["C408"]
 
 [tool.coverage.run]
 source = ["app"]
