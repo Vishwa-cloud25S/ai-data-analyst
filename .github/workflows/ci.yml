@@ -77,6 +77,13 @@ jobs:
         run: docker build -t ai-data-analyst:ci .
       - name: Build UI image
         run: docker build -f Dockerfile.ui -t ai-data-analyst-ui:ci .
+      - name: UI image has every dependency it imports
+        # Splitting requirements per image once shipped a UI that crashed on
+        # `import yaml` because PyYAML was only in the API list. Importing every
+        # UI module inside the real image is the check that would have caught it.
+        run: |
+          docker run --rm -e PYTHONPATH=/srv ai-data-analyst-ui:ci \
+            python -c "import ui.api_client, ui.charts, ui.layer_editor; print('ui imports ok')"
       - name: Smoke test the API container
         run: |
           docker run -d --name api -p 8000:8000 ai-data-analyst:ci
