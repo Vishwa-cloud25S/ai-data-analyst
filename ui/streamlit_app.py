@@ -34,7 +34,7 @@ st.markdown("""
 <style>
   :root { --ink:#0f1720; --mute:#6b7a8c; --line:#e3e8ee; --accent:#0b64d0;
           --good:#0a7c53; --warn:#b3261e; --soft:#f5f7fa; }
-  .block-container { padding-top: 2.1rem; padding-bottom: 3rem; max-width: 1180px; }
+  .block-container { padding-top: 3rem; padding-bottom: 3rem; max-width: 1180px; }
   h1, h2, h3 { letter-spacing: -0.02em; color: var(--ink); }
   #MainMenu, footer { visibility: hidden; }
 
@@ -105,7 +105,6 @@ with st.sidebar:
     st.title("📊 AI Data Analyst")
     st.caption("Natural language → governed SQL → chart + explanation")
 
-    st.caption(f"API: `{API_URL}`")
     api_ok = False
     health: dict = {}
     try:
@@ -118,6 +117,18 @@ with st.sidebar:
             f"**Model** `{llm_name}`  \n"
             f"{health['entities']} entities · {health['metrics']} certified metrics"
         )
+        # Show the endpoint actually in use. After a fallback the configured
+        # value is not the one serving traffic, and displaying the stale one
+        # sends people to debug a URL the app already stopped using.
+        effective = client.base_url
+        if effective.rstrip("/") != (API_URL or "").rstrip("/"):
+            st.caption(f"API: `{effective}`")
+            st.info(f"`API_URL` is set to `{API_URL}`, which is unreachable. "
+                    f"Fell back to the public endpoint. Set `API_URL` to "
+                    f"`{effective}` to remove the guesswork.", icon="⚠️")
+        else:
+            st.caption(f"API: `{effective}`")
+
         if health.get("auth_enabled"):
             who = cached_get("/whoami")
             if who.get("ok"):
@@ -127,8 +138,10 @@ with st.sidebar:
                 st.warning("Authentication is required by this API. "
                            "Set API_KEY in the UI environment.")
         else:
-            st.caption("Auth disabled (local mode)")
+            st.caption(f"Auth disabled — callers are anonymous "
+                       f"(`{health.get('anonymous_role', 'analyst')}` role)")
     except ApiError as exc:
+        st.caption(f"API: `{API_URL}`")
         st.error(str(exc))
 
     llm_configured = api_ok and health.get("llm") != "offline-rules"

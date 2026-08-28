@@ -67,6 +67,7 @@ class HealthResponse(BaseModel):
     entities: int
     metrics: int
     auth_enabled: bool = False
+    anonymous_role: str = "analyst"
     audit_enabled: bool = True
 
 

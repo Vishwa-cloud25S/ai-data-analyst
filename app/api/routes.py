@@ -53,6 +53,7 @@ def health() -> HealthResponse:
         entities=len(sl.entities),
         metrics=len(sl.metrics),
         auth_enabled=settings.auth_enabled,
+        anonymous_role=settings.anonymous_role,
         audit_enabled=settings.audit_enabled,
     )
 
