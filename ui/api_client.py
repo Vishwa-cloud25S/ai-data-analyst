@@ -6,16 +6,37 @@ failure paths without a browser session.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import requests
+
+log = logging.getLogger(__name__)
 
 HEALTH_KEYS = {"status", "warehouse", "llm", "entities", "metrics"}
 
 
 class ApiError(Exception):
     """Raised when the API is unreachable, errors, or is not our API."""
+
+
+def fallback_base_urls(url: str) -> list[str]:
+    """Public URLs to try when a private/internal address does not resolve.
+
+    Render's `fromService: hostport` yields a dotless internal name such as
+    `ai-data-analyst-api-krvg:10000`, which free instances cannot reach. Rather
+    than leave the UI dead until someone edits an environment variable, try the
+    public equivalent of the same service. Only ever attempted for a *dotless*
+    host - a real hostname is never second-guessed.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(normalise_base_url(url))
+    host = (parsed.hostname or "").strip()
+    if not host or "." in host or host in ("localhost", "api", "ui"):
+        return []
+    return [f"https://{host}.onrender.com"]
 
 
 def normalise_base_url(url: str) -> str:
@@ -41,6 +62,7 @@ class ApiClient:
 
     def __post_init__(self) -> None:
         self.base_url = normalise_base_url(self.base_url)
+        self._tried_fallback = False
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url.rstrip('/')}{path}"
@@ -51,6 +73,23 @@ class ApiClient:
             resp = requests.request(method, url, timeout=self.timeout,
                                     headers=headers, **kwargs)
         except requests.exceptions.ConnectionError as exc:
+            # An internal address that does not resolve: try the public one once,
+            # and keep it if it works, so the whole session recovers.
+            if not self._tried_fallback:
+                self._tried_fallback = True
+                for candidate in fallback_base_urls(self.base_url):
+                    try:
+                        probe = requests.get(f"{candidate}/health", timeout=self.timeout)
+                        if probe.status_code == 200:
+                            log.warning(
+                                "API_URL %s is unreachable; falling back to %s. "
+                                "Set API_URL to that value to remove this guesswork.",
+                                self.base_url, candidate,
+                            )
+                            self.base_url = candidate
+                            return self._request(method, path, **kwargs)
+                    except requests.exceptions.RequestException:
+                        continue
             hint = (
                 "Locally: start it with  uvicorn app.main:app --port 8000"
                 if any(h in self.base_url for h in ("localhost", "127.0.0.1"))

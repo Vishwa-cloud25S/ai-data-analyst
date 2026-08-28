@@ -56,7 +56,7 @@ mandatory filters.
 
 | Claim | Evidence |
 |---|---|
-| Guardrails hold | 198 tests; a dedicated CI job; container smoke test asserting a live deploy refuses `drop table` |
+| Guardrails hold | 260 tests; a dedicated CI job; container smoke test asserting a live deploy refuses `drop table` |
 | Works on unfamiliar schemas | [Chinook case study](CASE_STUDY_CHINOOK.md) — pointed at an 11-table schema it had never seen, found and fixed six bugs, now answers three-hop questions correctly |
 | Fast onboarding | `ai-analyst init` drafts a semantic layer from your warehouse or dbt manifest in seconds |
 | Real deployment | Live on Render; `docker compose up` locally |

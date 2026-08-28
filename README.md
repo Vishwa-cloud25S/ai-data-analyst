@@ -294,7 +294,7 @@ app/
   semantic/     semantic_layer.yml · loader · bootstrap (introspection + dbt import)
 dbt/            staging + marts models, schema.yml (metadata source for RAG)
 ui/             Streamlit app (HTTP only, no DB, no keys)
-tests/          253 tests: guardrails, scope gate, auth & roles, audit log,
+tests/          260 tests: guardrails, scope gate, auth & roles, audit log,
                 intent, time parsing, retrieval, execution, result checks,
                 pipeline, API, UI
 .github/        lint · test matrix · guardrail suite · docker smoke test
@@ -303,7 +303,7 @@ tests/          253 tests: guardrails, scope gate, auth & roles, audit log,
 ## Testing
 
 ```bash
-make test        # 253 tests, no network required
+make test        # 260 tests, no network required
 make lint
 ```
 

@@ -4,6 +4,28 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning is
 [semantic](https://semver.org/).
 
+## [1.1.2] — 2026-08-28
+
+### Fixed
+
+**The UI image was missing PyYAML.** The deployed interface crashed with
+`ModuleNotFoundError: No module named 'yaml'` before rendering anything: when
+requirements were split per image, PyYAML went to the API list only, and the
+editor parses the semantic layer client-side. Every local run passed because
+development installs both sets. CI now imports every UI module inside the built
+UI image.
+
+**`API_URL` pointed at an address free instances cannot reach.** The blueprint
+wired it with `fromService: property: hostport`, which resolves to Render's
+private network — unavailable on free tiers — so the UI reported the API
+unreachable while the API itself served public traffic perfectly. The blueprint
+now requires the public URL, and the client falls back once per session to the
+public equivalent of a dotless internal hostname rather than staying dead until
+someone edits an environment variable.
+
+**Editor backups are gitignored.** They are operational state and can describe a
+customer's schema, so they must never be committed.
+
 ## [1.1.1] — 2026-08-27
 
 ### Security

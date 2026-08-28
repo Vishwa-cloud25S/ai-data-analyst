@@ -126,3 +126,59 @@ def test_schemeless_url_raises_apierror_not_a_traceback():
     client = ApiClient("does-not-resolve-xyz:10000", timeout=5)
     with pytest.raises(ApiError):
         client.health()
+
+
+# ---------------------------------------------------------------- fallback
+@pytest.mark.parametrize("url,expected", [
+    ("ai-data-analyst-api-krvg:10000", ["https://ai-data-analyst-api-krvg.onrender.com"]),
+    ("http://ai-data-analyst-api-krvg:10000", ["https://ai-data-analyst-api-krvg.onrender.com"]),
+    ("http://localhost:8000", []),      # local dev is never rewritten
+    ("http://api:8000", []),            # docker compose service name
+    ("https://real.example.com", []),   # a real hostname is never second-guessed
+])
+def test_fallback_candidates(url, expected):
+    from ui.api_client import fallback_base_urls
+
+    assert fallback_base_urls(url) == expected
+
+
+def test_unreachable_internal_address_falls_back_to_a_working_one(monkeypatch):
+    """Render's private hostport does not resolve on free instances.
+
+    Rather than leave the UI dead until someone edits an environment variable,
+    the client tries the public equivalent once and keeps it if it works.
+    """
+    import ui.api_client as mod
+
+    healthy = {"status": "ok", "warehouse": "duckdb", "llm": "offline-rules",
+               "entities": 3, "metrics": 7}
+    srv, url = _serve(_json_handler(200, healthy))
+    public = url.rsplit("/", 0)[0]
+
+    def fake_candidates(_):
+        return [public]
+
+    monkeypatch.setattr(mod, "fallback_base_urls", fake_candidates)
+    try:
+        client = mod.ApiClient("unreachable-internal-name:10000", timeout=3)
+        assert client.health() == healthy
+        assert client.base_url == public, "the working URL should stick for the session"
+    finally:
+        srv.shutdown()
+
+
+def test_fallback_is_attempted_only_once(monkeypatch):
+    import ui.api_client as mod
+
+    calls = []
+
+    def fake_candidates(u):
+        calls.append(u)
+        return []
+
+    monkeypatch.setattr(mod, "fallback_base_urls", fake_candidates)
+    client = mod.ApiClient("unreachable-internal-name:10000", timeout=2)
+    for _ in range(3):
+        with pytest.raises(ApiError):
+            client.health()
+    assert len(calls) == 1, "a dead fallback must not be retried on every request"

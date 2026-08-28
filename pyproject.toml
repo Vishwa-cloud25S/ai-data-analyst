@@ -1,6 +1,6 @@
 [project]
 name = "ai-data-analyst"
-version = "1.1.1"
+version = "1.1.2"
 description = "Governed natural-language analytics: LLM plans, the semantic layer decides, the warehouse stays read-only."
 requires-python = ">=3.11"
 
