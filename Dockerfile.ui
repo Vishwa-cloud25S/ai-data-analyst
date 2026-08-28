@@ -10,6 +10,7 @@ COPY requirements-ui.txt .
 RUN pip install --no-cache-dir -r requirements-ui.txt
 
 COPY ui ./ui
+COPY .streamlit ./.streamlit
 
 RUN useradd -m -u 10002 viewer
 USER viewer

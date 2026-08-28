@@ -1,0 +1,20 @@
+# Theme for the analyst UI. Deliberately restrained: this is a tool people read
+# numbers from, so contrast and typography matter more than decoration.
+[theme]
+base = "light"
+primaryColor = "#0b64d0"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f7fa"
+textColor = "#0f1720"
+font = "sans serif"
+
+[server]
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true

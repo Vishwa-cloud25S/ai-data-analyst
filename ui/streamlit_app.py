@@ -24,7 +24,56 @@ except ImportError:  # pragma: no cover
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 API_KEY = os.getenv("API_KEY") or None
 
-st.set_page_config(page_title="AI Data Analyst", page_icon="📊", layout="wide")
+st.set_page_config(page_title="AI Data Analyst", page_icon="📊", layout="wide",
+                   initial_sidebar_state="expanded")
+
+# Streamlit's defaults read as "prototype". A buyer judges the screen in front
+# of them, so this tightens typography, spacing and the result surfaces without
+# turning the tool into a brochure - numbers stay the loudest thing on screen.
+st.markdown("""
+<style>
+  :root { --ink:#0f1720; --mute:#6b7a8c; --line:#e3e8ee; --accent:#0b64d0;
+          --good:#0a7c53; --warn:#b3261e; --soft:#f5f7fa; }
+  .block-container { padding-top: 2.1rem; padding-bottom: 3rem; max-width: 1180px; }
+  h1, h2, h3 { letter-spacing: -0.02em; color: var(--ink); }
+  #MainMenu, footer { visibility: hidden; }
+
+  /* hero */
+  .ada-hero { border-bottom: 1px solid var(--line); padding-bottom: 1.1rem;
+              margin-bottom: 1.4rem; }
+  .ada-eyebrow { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                 font-size: .72rem; letter-spacing: .16em; text-transform: uppercase;
+                 color: var(--accent); margin-bottom: .35rem; }
+  .ada-title { font-size: 2.1rem; font-weight: 750; line-height: 1.12;
+               letter-spacing: -.03em; color: var(--ink); margin: 0 0 .35rem; }
+  .ada-sub { color: var(--mute); font-size: .96rem; margin: 0; }
+
+  /* answer surface */
+  .ada-answer { background: linear-gradient(180deg,#f7fbff,#f2f7fd);
+                border: 1px solid #d6e6f8; border-left: 4px solid var(--accent);
+                border-radius: 10px; padding: 1.05rem 1.2rem; font-size: 1.06rem;
+                line-height: 1.6; color: var(--ink); }
+  .ada-refused { background: #fff7f6; border: 1px solid #f3d3cf;
+                 border-left: 4px solid var(--warn); border-radius: 10px;
+                 padding: 1.05rem 1.2rem; color: #7d2018; font-size: 1rem; }
+
+  /* sidebar */
+  section[data-testid="stSidebar"] { background: var(--soft);
+                                     border-right: 1px solid var(--line); }
+  section[data-testid="stSidebar"] .block-container { padding-top: 1.4rem; }
+
+  /* controls */
+  .stButton > button { border-radius: 8px; font-weight: 550; border: 1px solid var(--line);
+                       transition: all .14s ease; }
+  .stButton > button:hover { border-color: var(--accent); color: var(--accent);
+                             transform: translateY(-1px); }
+  .stButton > button[kind="primary"] { background: var(--accent); border-color: var(--accent); }
+  .stTextInput input { border-radius: 8px; font-size: 1rem; padding: .65rem .8rem; }
+  .stTabs [data-baseweb="tab"] { font-weight: 560; }
+  div[data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 9px; }
+  code { font-size: .84em; }
+</style>
+""", unsafe_allow_html=True)
 
 STAGE_LABELS = {
     "intent_detection": "1 · Intent detection",
@@ -112,7 +161,15 @@ with st.sidebar:
                 st.code(m["expression"], language="sql")
 
 # ----------------------------------------------------------------- main
-st.header("Ask a question about the business")
+st.markdown(
+    '<div class="ada-hero">'
+    '<div class="ada-eyebrow">Governed natural-language analytics</div>'
+    '<div class="ada-title">Ask a question about the business</div>'
+    '<p class="ada-sub">Every answer is produced by validated SQL against certified '
+    'metrics — and shown with the query that produced it.</p>'
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 if not api_ok:
     st.error("The API is not reachable, so questions cannot be answered. "
@@ -143,13 +200,15 @@ if run and question.strip():
 
     status = res.get("status")
     if status == "refused":
-        st.warning(res.get("answer", "Refused"))
+        st.markdown(f'<div class="ada-refused"><b>Refused.</b> '
+                    f'{res.get("answer", "")}</div>', unsafe_allow_html=True)
         for issue in res.get("issues", []):
             st.caption(f"• {issue}")
     elif status == "error":
         st.error(res.get("answer"))
     else:
-        st.success(res.get("answer") or "(no answer returned)")
+        st.markdown(f'<div class="ada-answer">{res.get("answer") or "(no answer)"}</div>',
+                    unsafe_allow_html=True)
         conf = res.get("confidence", 0)
         st.progress(min(max(conf, 0.0), 1.0), text=f"Confidence {conf:.0%}")
 
