@@ -182,3 +182,57 @@ def test_fallback_is_attempted_only_once(monkeypatch):
         with pytest.raises(ApiError):
             client.health()
     assert len(calls) == 1, "a dead fallback must not be retried on every request"
+
+
+def test_sleeping_service_is_retried_before_giving_up(monkeypatch):
+    """A sleeping free-tier host answers nothing at all, not a 502.
+
+    The first probe therefore fails on exactly the occasion the fallback is
+    most needed, so one attempt was never enough.
+    """
+    import requests
+
+    import ui.api_client as mod
+
+    attempts = {"n": 0}
+    healthy = {"status": "ok", "warehouse": "duckdb", "llm": "offline-rules",
+               "entities": 3, "metrics": 7}
+    srv, url = _serve(_json_handler(200, healthy))
+    real_get = requests.get
+
+    def flaky_get(u, **kw):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise requests.exceptions.ConnectionError("asleep")
+        return real_get(u, **kw)
+
+    monkeypatch.setattr(mod, "fallback_base_urls", lambda _: [url])
+    monkeypatch.setattr(mod.requests, "get", flaky_get)
+    try:
+        client = mod.ApiClient("unreachable-internal:10000", timeout=5)
+        assert client.health() == healthy
+        assert attempts["n"] >= 2, "the probe must retry a sleeping host"
+    finally:
+        srv.shutdown()
+
+
+def test_any_http_response_proves_the_host_exists(monkeypatch):
+    """A 502 from a waking instance still means the hostname routes."""
+    import ui.api_client as mod
+
+    srv, bad_url = _serve(_json_handler(502, {"detail": "waking"}))
+    try:
+        monkeypatch.setattr(mod, "fallback_base_urls", lambda _: [bad_url])
+        client = mod.ApiClient("unreachable-internal:10000", timeout=5)
+        assert client._resolve_fallback() == bad_url
+    finally:
+        srv.shutdown()
+
+
+def test_hosted_platforms_mention_cold_starts():
+    """Advice must fit where the app runs: a Render operator cannot run uvicorn."""
+    client = ApiClient("https://does-not-resolve-xyz.onrender.com", timeout=3)
+    assert "sleep after inactivity" in client._unreachable_message()
+    assert "uvicorn" in ApiClient("http://localhost:9999")._unreachable_message()
+    assert "API_URL is probably wrong" in ApiClient(
+        "http://some-internal-host:10000")._unreachable_message()

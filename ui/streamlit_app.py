@@ -74,6 +74,7 @@ st.markdown("""
   section[data-testid="stSidebar"] .block-container { padding-top:1.3rem; }
   .ada-status { display:flex; align-items:center; gap:.5rem; font-weight:600;
                 color:var(--good); font-size:.92rem; }
+  .ada-status.bad { color:var(--warn); }
   .ada-dot { width:8px; height:8px; border-radius:50%; background:var(--good); }
   .ada-dot.bad { background:var(--warn); }
   .ada-facts { font-size:.87rem; color:var(--mute); line-height:1.75; margin-top:.5rem; }
@@ -103,14 +104,26 @@ STAGE_LABELS = {
 }
 STATUS_ICON = {"ok": "✅", "blocked": "🛑", "error": "❌", "skipped": "⏭️"}
 
-client = ApiClient(API_URL, api_key=API_KEY)
+def _client() -> ApiClient:
+    """One client per session, reusing any endpoint already resolved.
+
+    Streamlit re-runs this script on every interaction, so without this the
+    fallback probe - which can take a minute against a sleeping service - would
+    run again on every click.
+    """
+    resolved = st.session_state.get("resolved_api_url")
+    return ApiClient(resolved or API_URL, api_key=API_KEY)
+
+
+client = _client()
 
 
 @st.cache_data(ttl=30, show_spinner=False)
 def cached_get(path: str) -> dict:
     """Returns {"ok": bool, "data"|"error": ...} so callers must handle failure."""
     try:
-        return {"ok": True, "data": ApiClient(API_URL, api_key=API_KEY).get(path)}
+        base = st.session_state.get("resolved_api_url") or API_URL
+        return {"ok": True, "data": ApiClient(base, api_key=API_KEY).get(path)}
     except ApiError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -125,6 +138,7 @@ with st.sidebar:
     try:
         health = client.health()
         api_ok = True
+        st.session_state["resolved_api_url"] = client.base_url
         st.markdown('<div class="ada-status"><span class="ada-dot"></span>'
                     'Connected</div>', unsafe_allow_html=True)
         st.markdown(
@@ -144,9 +158,13 @@ with st.sidebar:
             st.caption(f"No sign-in required · anonymous "
                        f"`{health.get('anonymous_role', 'analyst')}`")
     except ApiError as exc:
-        st.markdown('<div class="ada-status"><span class="ada-dot bad"></span>'
+        st.markdown('<div class="ada-status bad"><span class="ada-dot bad"></span>'
                     'Not connected</div>', unsafe_allow_html=True)
         st.error(str(exc))
+        if st.button("Retry connection", use_container_width=True):
+            st.session_state.pop("resolved_api_url", None)
+            st.cache_data.clear()
+            st.rerun()
 
     st.divider()
     llm_configured = api_ok and health.get("llm") != "offline-rules"

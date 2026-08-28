@@ -7,6 +7,7 @@ failure paths without a browser session.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,7 +63,56 @@ class ApiClient:
 
     def __post_init__(self) -> None:
         self.base_url = normalise_base_url(self.base_url)
-        self._tried_fallback = False
+        self._fallback_checked = False
+        self._resolved: str | None = None
+
+    def _unreachable_message(self) -> str:
+        """Advice that fits where the app is actually running."""
+        local = any(h in self.base_url for h in ("localhost", "127.0.0.1"))
+        hosted = any(h in self.base_url for h in (".onrender.com", "herokuapp",
+                                                  ".fly.dev", ".railway.app"))
+        if local:
+            hint = "Start it with:  uvicorn app.main:app --port 8000"
+        elif hosted:
+            hint = ("Free-tier services sleep after inactivity and can take a minute "
+                    "to wake. Press Retry in a moment. If it never comes back, check "
+                    "the service is deployed and healthy.")
+        else:
+            hint = ("If this is a deployment, API_URL is probably wrong. It must be a "
+                    "URL this container can reach, e.g. https://<service>.onrender.com "
+                    "- a private-network address like host:10000 will not resolve "
+                    "where private networking is unavailable (Render free tier).")
+        return f"Cannot reach the API at {self.base_url}. Is it running?\n\n{hint}"
+
+    def _resolve_fallback(self) -> str | None:
+        """Find a reachable public equivalent of an unreachable internal host.
+
+        A sleeping free-tier service answers nothing at all - the connection
+        times out rather than returning 502 - so a single probe fails on exactly
+        the occasion the fallback is most needed. Retry a couple of times, and
+        accept *any* HTTP response: a 502 from a waking instance still proves
+        the host exists and routes.
+        """
+        if self._fallback_checked:
+            return self._resolved
+        self._fallback_checked = True
+        probe_timeout = min(self.timeout, 25)
+        for candidate in fallback_base_urls(self.base_url):
+            for attempt in range(2):
+                try:
+                    probe = requests.get(f"{candidate}/health", timeout=probe_timeout)
+                    if probe.status_code < 600:
+                        log.warning(
+                            "API_URL %s is unreachable; using %s instead. "
+                            "Set API_URL to that value to remove this guesswork.",
+                            self.base_url, candidate,
+                        )
+                        self._resolved = candidate
+                        return candidate
+                except requests.exceptions.RequestException:
+                    if attempt == 0:
+                        time.sleep(1.5)   # a waking instance needs a moment
+        return None
 
     def _request(self, method: str, path: str, **kwargs) -> Any:
         url = f"{self.base_url.rstrip('/')}{path}"
@@ -72,39 +122,17 @@ class ApiClient:
         try:
             resp = requests.request(method, url, timeout=self.timeout,
                                     headers=headers, **kwargs)
-        except requests.exceptions.ConnectionError as exc:
-            # An internal address that does not resolve: try the public one once,
-            # and keep it if it works, so the whole session recovers.
-            if not self._tried_fallback:
-                self._tried_fallback = True
-                for candidate in fallback_base_urls(self.base_url):
-                    try:
-                        probe = requests.get(f"{candidate}/health", timeout=self.timeout)
-                        if probe.status_code == 200:
-                            log.warning(
-                                "API_URL %s is unreachable; falling back to %s. "
-                                "Set API_URL to that value to remove this guesswork.",
-                                self.base_url, candidate,
-                            )
-                            self.base_url = candidate
-                            return self._request(method, path, **kwargs)
-                    except requests.exceptions.RequestException:
-                        continue
-            hint = (
-                "Locally: start it with  uvicorn app.main:app --port 8000"
-                if any(h in self.base_url for h in ("localhost", "127.0.0.1"))
-                else "If this is a deployment, API_URL is probably wrong. It must be "
-                     "the API's reachable URL, e.g. https://<service>.onrender.com - "
-                     "a private-network address like host:10000 will not resolve on "
-                     "hosts that do not support private networking (Render free tier)."
-            )
-            raise ApiError(
-                f"Cannot reach the API at {self.base_url}. Is it running?\n\n{hint}"
-            ) from exc
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout) as exc:
+            resolved = self._resolve_fallback()
+            if resolved and resolved != self.base_url:
+                self.base_url = resolved
+                return self._request(method, path, **kwargs)
+            raise ApiError(self._unreachable_message()) from exc
         except requests.exceptions.Timeout as exc:
             raise ApiError(f"The API at {url} timed out after {self.timeout}s.") from exc
         except requests.exceptions.RequestException as exc:
-            # Malformed URL, bad redirect, TLS failure - never surface a raw traceback.
+            # Malformed URL, bad redirect, TLS failure - never a raw traceback.
             raise ApiError(f"Request to {url} failed: {type(exc).__name__}: {exc}") from exc
 
         if resp.status_code >= 400:
