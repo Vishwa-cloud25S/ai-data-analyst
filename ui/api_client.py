@@ -17,6 +17,14 @@ log = logging.getLogger(__name__)
 
 HEALTH_KEYS = {"status", "warehouse", "llm", "entities", "metrics"}
 
+# Gateway errors mean "the upstream is not ready yet" on managed platforms: a
+# sleeping free-tier instance answers 502 from the load balancer while it
+# spins up (30-60s). Retrying a couple of times with a pause covers the
+# common case; if it still fails the message says "waking up", not "broken".
+GATEWAY_CODES = (502, 503, 504)
+WAKE_DELAYS = (3.0, 8.0)
+HOSTED_SUFFIXES = (".onrender.com", ".herokuapp.com", ".fly.dev", ".railway.app")
+
 
 class ApiError(Exception):
     """Raised when the API is unreachable, errors, or is not our API."""
@@ -84,6 +92,13 @@ class ApiClient:
                     "where private networking is unavailable (Render free tier).")
         return f"Cannot reach the API at {self.base_url}. Is it running?\n\n{hint}"
 
+    def _is_hosted(self) -> bool:
+        """True on platforms where a sleeping instance answers 502 while waking."""
+        from urllib.parse import urlparse
+
+        host = (urlparse(self.base_url).hostname or "").lower()
+        return any(host.endswith(suffix) for suffix in HOSTED_SUFFIXES)
+
     def _resolve_fallback(self) -> str | None:
         """Find a reachable public equivalent of an unreachable internal host.
 
@@ -119,21 +134,41 @@ class ApiClient:
         headers = dict(kwargs.pop("headers", {}) or {})
         if self.api_key:
             headers["X-API-Key"] = self.api_key
-        try:
-            resp = requests.request(method, url, timeout=self.timeout,
-                                    headers=headers, **kwargs)
-        except (requests.exceptions.ConnectionError,
-                requests.exceptions.ReadTimeout) as exc:
-            resolved = self._resolve_fallback()
-            if resolved and resolved != self.base_url:
-                self.base_url = resolved
-                return self._request(method, path, **kwargs)
-            raise ApiError(self._unreachable_message()) from exc
-        except requests.exceptions.Timeout as exc:
-            raise ApiError(f"The API at {url} timed out after {self.timeout}s.") from exc
-        except requests.exceptions.RequestException as exc:
-            # Malformed URL, bad redirect, TLS failure - never a raw traceback.
-            raise ApiError(f"Request to {url} failed: {type(exc).__name__}: {exc}") from exc
+        # A sleeping free-tier instance answers 502 from the load balancer
+        # while it wakes (30-60s on Render). The first hit keeps the boot in
+        # flight and the next one gets through - so retry a couple of times
+        # before reporting it. Local servers are exempt: a 502 there is a
+        # real error, not a cold start.
+        attempts = 3 if self._is_hosted() else 1
+        for attempt in range(attempts):
+            try:
+                resp = requests.request(method, url, timeout=self.timeout,
+                                        headers=headers, **kwargs)
+            except (requests.exceptions.ConnectionError,
+                    requests.exceptions.ReadTimeout) as exc:
+                resolved = self._resolve_fallback()
+                if resolved and resolved != self.base_url:
+                    self.base_url = resolved
+                    return self._request(method, path, **kwargs)
+                raise ApiError(self._unreachable_message()) from exc
+            except requests.exceptions.Timeout as exc:
+                raise ApiError(f"The API at {url} timed out after {self.timeout}s.") from exc
+            except requests.exceptions.RequestException as exc:
+                # Malformed URL, bad redirect, TLS failure - never a raw traceback.
+                raise ApiError(f"Request to {url} failed: {type(exc).__name__}: {exc}") from exc
+
+            if resp.status_code in GATEWAY_CODES and attempt + 1 < attempts:
+                time.sleep(WAKE_DELAYS[min(attempt, len(WAKE_DELAYS) - 1)])
+                continue
+            break
+
+        if resp.status_code in GATEWAY_CODES and self._is_hosted():
+            raise ApiError(
+                f"The API at {self.base_url} is still waking up "
+                f"(HTTP {resp.status_code}). Free-tier services sleep after "
+                "inactivity and can take up to a minute to start. Wait a few "
+                "seconds, then press Retry connection."
+            )
 
         if resp.status_code >= 400:
             detail = ""

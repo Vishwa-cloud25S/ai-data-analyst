@@ -236,3 +236,81 @@ def test_hosted_platforms_mention_cold_starts():
     assert "uvicorn" in ApiClient("http://localhost:9999")._unreachable_message()
     assert "API_URL is probably wrong" in ApiClient(
         "http://some-internal-host:10000")._unreachable_message()
+
+
+# ------------------------------------------------------------- cold starts
+class _FakeResp:
+    def __init__(self, status: int, payload=None, text: str = ""):
+        self.status_code = status
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json body")
+        return self._payload
+
+
+def test_waking_hosted_service_is_retried(monkeypatch):
+    """Render's load balancer answers 502 while a sleeping instance wakes.
+
+    The first hit keeps the boot in flight; a couple of retries later the
+    same request goes through instead of the UI declaring 'Not connected'.
+    """
+    import ui.api_client as mod
+
+    healthy = {"status": "ok", "warehouse": "duckdb", "llm": "offline-rules",
+               "entities": 3, "metrics": 7}
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    def fake_request(method, url, **kw):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return _FakeResp(502, text="<html>502</html>")
+        return _FakeResp(200, payload=healthy)
+
+    monkeypatch.setattr(mod.requests, "request", fake_request)
+    monkeypatch.setattr(mod.time, "sleep", sleeps.append)
+    assert ApiClient("https://waking-api.onrender.com", timeout=5).health()["status"] == "ok"
+    assert calls["n"] == 3, "a waking instance should get a few chances"
+    assert len(sleeps) == 2, "retries should be spaced, not hammered"
+
+
+def test_persistently_waking_service_says_waking_not_broken(monkeypatch):
+    """If the instance never wakes, say so - never dump the 502 HTML page."""
+    import ui.api_client as mod
+
+    calls = {"n": 0}
+
+    def fake_request(method, url, **kw):
+        calls["n"] += 1
+        return _FakeResp(502, text="<html><title>502</title></html>")
+
+    monkeypatch.setattr(mod.requests, "request", fake_request)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    with pytest.raises(ApiError) as exc:
+        ApiClient("https://waking-api.onrender.com", timeout=5).health()
+    assert calls["n"] == 3, "the retry budget should be used up"
+    msg = str(exc.value)
+    assert "waking up" in msg
+    assert "Retry connection" in msg
+    assert "<html" not in msg
+
+
+def test_local_502_is_not_a_cold_start(monkeypatch):
+    """A local server returning 502 is a real error - no sleeping around."""
+    import ui.api_client as mod
+
+    calls = {"n": 0}
+
+    def fake_request(method, url, **kw):
+        calls["n"] += 1
+        return _FakeResp(502, payload={"detail": "bad upstream"})
+
+    monkeypatch.setattr(mod.requests, "request", fake_request)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    with pytest.raises(ApiError) as exc:
+        ApiClient("http://localhost:8000", timeout=5).health()
+    assert calls["n"] == 1
+    assert "HTTP 502" in str(exc.value)
