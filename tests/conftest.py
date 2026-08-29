@@ -11,6 +11,20 @@ os.environ.setdefault("OPENAI_API_KEY", "")
 os.environ.setdefault("WAREHOUSE", "duckdb")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limiter():
+    """Every test gets the full per-minute budget.
+
+    The limiter is one in-process singleton shared by every TestClient, so
+    the suite's own traffic would eventually 429 the later tests - not a
+    bug in the app, but not a useful failure either.
+    """
+    from app.main import limiter
+
+    limiter.reset()
+    yield
+
+
 @pytest.fixture(scope="session")
 def warehouse(tmp_path_factory) -> str:
     from app.db.seed import build
@@ -97,3 +111,49 @@ def client(warehouse, retriever, tmp_path, monkeypatch):
     with TestClient(fastapi_app) as c:
         yield c
     set_audit_log(None)
+
+
+#: Authenticated identities for tests that exercise the real auth path.
+ADMIN = "editor-admin-key-000000000000"
+ANALYST = "editor-analyst-key-1111111111"
+
+
+@pytest.fixture
+def layer_client(warehouse, retriever, tmp_path, monkeypatch):
+    """API client whose semantic layer is a disposable copy.
+
+    Used by every test that mutates the layer (editor, dataset uploads) so
+    the checked-in YAML is never touched and each test starts clean.
+    """
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    import app.core.security as security
+    import app.pipeline.orchestrator as orch
+    from app.core.audit import AuditLog, set_audit_log
+    from app.core.config import settings
+    from app.main import app as fastapi_app
+    from app.pipeline.executor import DuckDBExecutor
+    from app.pipeline.orchestrator import Analyst
+    from app.semantic import editor
+
+    layer_copy = tmp_path / "semantic_layer.yml"
+    shutil.copy2(settings.semantic_layer_path, layer_copy)
+
+    monkeypatch.setattr(settings, "semantic_layer_path", str(layer_copy))
+    monkeypatch.setattr(settings, "duckdb_path", warehouse)
+    monkeypatch.setattr(settings, "auth_enabled", True)
+    monkeypatch.setattr(settings, "api_keys",
+                        f"{ADMIN}:admin:alice,{ANALYST}:analyst:bob")
+    monkeypatch.setattr(settings, "audit_enabled", True)
+    security.reset_keyring()
+    audit = AuditLog(str(tmp_path / "audit.sqlite"))
+    set_audit_log(audit)
+    orch._analyst = Analyst(executor=DuckDBExecutor(path=warehouse),
+                            retriever=retriever, use_llm=False)
+    with TestClient(fastapi_app) as c:
+        yield c, layer_copy, audit
+    security.reset_keyring()
+    set_audit_log(None)
+    editor.reload_caches()

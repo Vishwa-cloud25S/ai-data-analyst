@@ -46,7 +46,7 @@ app.add_middleware(
 
 #: Paths worth throttling: they cost real work. /health must stay free so
 #: platform health checks are never rate limited into failure.
-THROTTLED_PREFIXES = ("/ask", "/validate-sql", "/semantic-layer")
+THROTTLED_PREFIXES = ("/ask", "/validate-sql", "/semantic-layer", "/datasets/upload")
 
 limiter = RateLimiter(settings.rate_limit_per_minute)
 

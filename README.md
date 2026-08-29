@@ -185,6 +185,38 @@ first time this was pointed at a schema it had never seen — six bugs in ten
 minutes, including a passing test that only passed because its fixtures shared
 my assumptions.
 
+### Or upload a CSV straight from the UI
+
+For a first look — before any onboarding — the UI has an **Upload a CSV to
+analyse** button. One file becomes a queryable dataset:
+
+- the file lands in a new table in the DuckDB warehouse (`upload_<name>`);
+- columns are auto-classified and one **draft metric per measure** is added to
+  the semantic layer (flagged `REVIEW`, like every generated definition);
+- key columns matching existing entities (e.g. `product_id`) get a join, so the
+  new data can be asked about *alongside* the rest;
+- columns that look like personal data (email, phone, salary, name…) are
+  **not declared**, so the model cannot see them and the validator cannot let
+  them into SQL — they are reported back to the uploader, who can expose them
+  deliberately through the semantic-layer editor if they know what they are
+  doing;
+- the merged layer must **load and execute** before it is saved; if it fails,
+  the table is dropped again and the system is exactly as it was.
+
+Limits: 10 MB, 200k rows, 100 columns; CSV only. `analyst` role and up
+(uploads are rate limited like `/ask`). Uploaded datasets can be removed from
+the same panel; built-in tables never. On the free-tier deployment the data is
+temporary — it resets when the service redeploys.
+
+```bash
+curl -F "file=@sales_july.csv" localhost:8000/datasets/upload
+# {"table": "upload_sales_july", "rows": 1204,
+#  "hidden_columns": ["email"], "metrics_added": ["Total Revenue", "…"]}
+```
+
+`GET /datasets` answers "which data is this analyst looking at?": every
+warehouse table, its size, its columns, and whether it is exposed to the model.
+
 ## Quick start
 
 ```bash
@@ -252,6 +284,9 @@ curl -X POST localhost:8000/ask -H 'content-type: application/json' -d '{
 | `POST /ask` | The full pipeline. Returns answer, SQL, rows, chart spec, confidence, trace. |
 | `POST /validate-sql` | The guardrail on its own — auditable in isolation. |
 | `GET /semantic-layer` | The published contract: entities, metrics, approved joins. |
+| `GET /datasets` | Which data the analyst can see: tables, sizes, columns, exposure. |
+| `POST /datasets/upload` | Upload a CSV → new table + draft metrics + joins. Analyst and up. |
+| `DELETE /datasets/{table}` | Remove an uploaded dataset (built-ins are protected). Analyst and up. |
 | `GET /health` | Warehouse, active model, entity/metric counts, auth/audit flags. Public. |
 | `GET /whoami` | The caller's identity and role. |
 | `GET /audit` | Every question asked, with SQL, outcome and blocking stage. Admin. |

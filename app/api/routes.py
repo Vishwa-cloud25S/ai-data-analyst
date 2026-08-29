@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import time
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 from app.api.schemas import (
     AskRequest,
@@ -284,3 +287,94 @@ def examples() -> dict:
             "Which customer segment returns the most?",
         ]
     }
+
+
+# --------------------------------------------------------------------------
+# Bring your own data. Upload a CSV, get a queryable dataset: a new table in
+# the warehouse plus a draft semantic layer (metrics, joins) for it. PII-like
+# columns are withheld from the model and reported back.
+# --------------------------------------------------------------------------
+@router.get("/datasets", tags=["data"])
+def datasets_list(principal: Principal = Depends(require("viewer"))) -> dict:
+    """Which data the analyst can actually see - the answer to
+    'which dataset is this?'. Lists every warehouse table with its size,
+    columns, and whether it is exposed to the model."""
+    from app import datasets as ds
+
+    try:
+        return ds.list_datasets()
+    except ds.DatasetError as exc:
+        raise HTTPException(exc.status_code, detail=exc.message) from None
+
+
+@router.post("/datasets/upload", tags=["data"])
+def datasets_upload(
+    file: UploadFile = File(...),
+    request: Request = None,
+    principal: Principal = Depends(require("analyst")),
+) -> dict:
+    from app import datasets as ds
+
+    supported, reason = ds.upload_supported()
+    if not supported:
+        raise HTTPException(400, detail=reason)
+
+    name = Path(file.filename or "data.csv").name
+    if not name.lower().endswith(".csv"):
+        raise HTTPException(400, detail="Upload a .csv file: comma-separated, "
+                                        "one header row, one row per record.")
+    data = file.file.read(ds.MAX_FILE_BYTES + 1)
+    if len(data) > ds.MAX_FILE_BYTES:
+        raise HTTPException(413, detail=f"File too large; the limit is "
+                                        f"{ds.MAX_FILE_BYTES // (1024 * 1024)} MB.")
+    if not data.lstrip():
+        raise HTTPException(400, detail="The file is empty.")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ada-upload-"))
+    tmp = tmp_dir / "upload.csv"
+    try:
+        tmp.write_bytes(data)
+        try:
+            result = ds.ingest_csv(tmp, name, principal=principal.name)
+        except ds.DatasetError as exc:
+            raise HTTPException(exc.status_code, detail=exc.message) from None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if settings.audit_enabled:
+        get_audit_log().record(AuditEvent(
+            request_id="dataset-upload",
+            principal=principal.name, role=principal.role,
+            client_ip=_client_ip(request),
+            question=(f"UPLOAD dataset {result['table']} "
+                      f"({result['rows']:,} rows from {name})"),
+            status="answered",
+            issues=(result["hidden_columns"] or []),
+        ))
+    log.warning("dataset %s uploaded by %s (%s rows)",
+                result["table"], principal.name, result["rows"])
+    return result
+
+
+@router.delete("/datasets/{table}", tags=["data"])
+def datasets_remove(
+    table: str,
+    request: Request = None,
+    principal: Principal = Depends(require("analyst")),
+) -> dict:
+    from app import datasets as ds
+
+    try:
+        result = ds.remove_dataset(table, principal=principal.name)
+    except ds.DatasetError as exc:
+        raise HTTPException(exc.status_code, detail=exc.message) from None
+
+    if settings.audit_enabled:
+        get_audit_log().record(AuditEvent(
+            request_id="dataset-remove",
+            principal=principal.name, role=principal.role,
+            client_ip=_client_ip(request),
+            question=f"REMOVE dataset {table}",
+            status="answered",
+        ))
+    return result

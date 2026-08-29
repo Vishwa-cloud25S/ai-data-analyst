@@ -167,6 +167,79 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
+
+    # ------------------------------------------------- data: which + upload
+    st.markdown("### 📁 Your data")
+    if api_ok:
+        note = st.session_state.pop("dataset_note", None)
+        if note:
+            st.success(note)
+        ds = cached_get("/datasets")
+        if ds.get("ok"):
+            data = ds["data"]
+            up = data.get("upload", {})
+            if up.get("supported"):
+                up_file = st.file_uploader(
+                    "Upload a CSV to analyse", type=["csv"],
+                    help="Becomes a new table with auto-generated metrics. "
+                         "Columns that look like personal data are hidden "
+                         "from the model.")
+                if up_file and up_file.name != st.session_state.get("last_upload"):
+                    with st.spinner("Loading CSV and generating certified metrics…"):
+                        try:
+                            res = client.upload_file(
+                                "/datasets/upload", up_file.name, up_file.getvalue())
+                        except ApiError as exc:
+                            st.error(str(exc))
+                        else:
+                            msg = (f"Loaded **{res['table']}** — {res['rows']:,} rows, "
+                                   f"{res['n_columns']} columns.")
+                            if res.get("hidden_columns"):
+                                msg += (" Hidden from the model (looked like personal "
+                                        "data): " + ", ".join(res["hidden_columns"]))
+                            if res.get("joins_added"):
+                                msg += " Linked to: " + ", ".join(res["joins_added"])
+                            st.session_state["last_upload"] = up_file.name
+                            st.session_state["dataset_note"] = msg
+                            st.cache_data.clear()
+                            st.rerun()
+            elif up.get("reason"):
+                st.caption(f"Uploads need a DuckDB warehouse: {up['reason']}")
+
+            for d in data.get("datasets", []):
+                kind = " · yours" if d["source"] == "upload" else " · built-in"
+                exposed = "" if d.get("in_layer") else " — not exposed to the model"
+                label = f"**{d['name']}**{kind} — {d['rows']:,} rows{exposed}"
+                if d["source"] == "upload":
+                    c1, c2 = st.columns([5, 1])
+                    c1.markdown(label)
+                    if c2.button("Remove", key=f"rm_{d['name']}",
+                                 help="Delete this uploaded dataset"):
+                        try:
+                            client.delete(f"/datasets/{d['name']}")
+                        except ApiError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state.pop("dataset_note", None)
+                            st.cache_data.clear()
+                            st.rerun()
+                else:
+                    st.markdown(label)
+            if data.get("datasets"):
+                with st.expander("Columns"):
+                    for d in data["datasets"]:
+                        cols = ", ".join(
+                            f"{c['name']} ({c['type']})" for c in d["columns"][:12])
+                        more = (f" +{len(d['columns']) - 12} more"
+                                if len(d["columns"]) > 12 else "")
+                        st.caption(f"`{d['name']}` — {cols}{more}")
+            st.caption(
+                "Built-in: synthetic electronics-retail demo "
+                "(orders · products · customers). Uploaded data is temporary: "
+                "it resets when the service redeploys.")
+        else:
+            st.caption(f"Could not list the warehouse: {ds.get('error', 'unknown error')}")
+
     llm_configured = api_ok and health.get("llm") != "offline-rules"
     if llm_configured:
         use_llm = st.toggle("Use LLM", value=True,

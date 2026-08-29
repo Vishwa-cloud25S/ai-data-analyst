@@ -219,6 +219,14 @@ class ApiClient:
     def put_json(self, path: str, payload: dict) -> Any:
         return self._request("PUT", path, json=payload)
 
+    def upload_file(self, path: str, filename: str, data: bytes) -> Any:
+        """Multipart CSV upload (the one request shape _request had not seen)."""
+        return self._request("POST", path,
+                             files={"file": (filename, data, "text/csv")})
+
+    def delete(self, path: str) -> Any:
+        return self._request("DELETE", path)
+
     def ask(self, question: str, use_llm: bool) -> dict:
         data = self._request("POST", "/ask",
                              json={"question": question, "use_llm": use_llm})
